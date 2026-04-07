@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DPCrawler - RAG知识爬虫</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; overflow: hidden; }
+    
+    .app { display: flex; flex-direction: column; height: 100vh; }
+    
+    .header { background: #3b82f6; color: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .header h1 { font-size: 18px; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
+    .status-dot.active { background: #fbbf24; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    
+    .main { display: flex; flex: 1; overflow: hidden; }
+    
+    .sidebar { width: 280px; background: white; padding: 12px; overflow-y: auto; flex-shrink: 0; border-right: 1px solid #e5e7eb; }
+    .section { margin-bottom: 16px; }
+    .section-title { font-size: 11px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px; font-weight: 600; }
+    
+    label { display: block; font-size: 13px; color: #374151; margin-bottom: 4px; }
+    input, select { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; margin-bottom: 8px; }
+    textarea { width: 100%; min-height: 60px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: #3b82f6; }
+    
+    .extensions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .extensions label { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #f3f4f6; border-radius: 4px; cursor: pointer; margin: 0; font-size: 12px; }
+    .extensions input { width: auto; margin: 0; }
+    
+    .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+    .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-danger { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+    .btn-danger:hover { background: #fee2e2; }
+    
+    .content { flex: 1; display: flex; flex-direction: column; padding: 12px; overflow: hidden; min-width: 0; }
+    
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-shrink: 0; }
+    .topbar h2 { font-size: 16px; }
+    .action-buttons { display: flex; gap: 8px; }
+    .action-buttons .btn { width: auto; padding: 8px 16px; margin: 0; }
+    
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; }
+    .tab { padding: 8px 16px; border: none; background: none; font-size: 13px; color: #6b7280; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab:hover { color: #374151; }
+    .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+    
+    .tab-content { display: none; flex: 1; overflow: hidden; }
+    .tab-content.active { display: flex; flex-direction: column; }
+    
+    .log-container { background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px; flex: 1; overflow-y: auto; white-space: pre-wrap; }
+    .log-info { color: #60a5fa; }
+    .log-success { color: #4ade80; }
+    .log-error { color: #f87171; }
+    
+    .file-list { background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow-y: auto; flex: 1; min-width: 0; }
+    .files-panel { display: flex; flex: 1; overflow: hidden; }
+    .files-panel .file-list { flex: 0 0 280px; min-width: 150px; max-width: 60%; }
+    .panel-resizer { width: 6px; cursor: col-resize; background: #e5e7eb; flex-shrink: 0; transition: background 0.15s; }
+    .panel-resizer:hover, .panel-resizer.active { background: #3b82f6; }
+    .preview-panel { flex: 1; display: flex; flex-direction: column; background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; min-width: 0; }
+    .preview-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; background: #f9fafb; }
+    .preview-header span { font-size: 13px; color: #374151; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-open-btn { padding: 4px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #3b82f6; cursor: pointer; flex-shrink: 0; }
+    .preview-open-btn:hover { background: #eff6ff; }
+    .preview-content { flex: 1; padding: 16px; overflow-y: auto; font-size: 14px; line-height: 1.8; word-break: break-word; color: #1f2937; }
+    .preview-content h1 { font-size: 20px; font-weight: 700; margin: 12px 0 8px; }
+    .preview-content h2 { font-size: 18px; font-weight: 600; margin: 10px 0 6px; }
+    .preview-content h3 { font-size: 16px; font-weight: 600; margin: 8px 0 4px; }
+    .preview-content h4, .preview-content h5, .preview-content h6 { font-size: 14px; font-weight: 600; margin: 6px 0 4px; }
+    .preview-content p { margin: 6px 0; }
+    .preview-content a { color: #3b82f6; text-decoration: underline; }
+    .preview-content li { margin-left: 20px; list-style: disc; }
+    .preview-content hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
+    .preview-content img { max-width: 100%; border-radius: 4px; }
+    .preview-content table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+    .preview-content th, .preview-content td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+    .preview-content th { background: #f3f4f6; font-weight: 600; }
+    .preview-content tr:nth-child(even) { background: #f9fafb; }
+    .file-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #f3f4f6; border-left: 3px solid transparent; cursor: pointer; outline: none; }
+    .file-item .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-item .file-subdir { font-size: 10px; color: #9ca3af; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; margin-right: 4px; flex-shrink: 0; white-space: nowrap; }
+    .file-item .file-badge { flex-shrink: 0; }
+    .file-item:hover { background: #f9fafb; }
+    .file-item.selected { background: #dbeafe; border-left: 3px solid #3b82f6; font-weight: 500; }
+    .file-item.selected:hover { background: #dbeafe; }
+    .file-item:last-child { border-bottom: none; }
+    .file-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .file-badge.new { background: #dcfce7; color: #166534; }
+    .file-badge.updated { background: #fef3c7; color: #92400e; }
+    .file-badge.unchanged { background: #f3f4f6; color: #6b7280; }
+    
+    .result-cards { display: flex; gap: 12px; margin-bottom: 12px; flex-shrink: 0; }
+    .result-card { flex: 1; background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
+    .result-card .count { font-size: 32px; font-weight: 700; }
+    .result-card .label { color: #6b7280; font-size: 13px; margin-top: 4px; }
+    .result-card.new .count { color: #22c55e; }
+    .result-card.updated .count { color: #f59e0b; }
+    .result-card.total .count { color: #3b82f6; }
+    .result-card.unchanged .count { color: #9ca3af; }
+    .result-card.errors .count { color: #ef4444; }
+    
+    .progress { margin-bottom: 12px; flex-shrink: 0; }
+    .progress-bar { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: #3b82f6; transition: width 0.3s; }
+    .progress-text { font-size: 12px; color: #6b7280; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>DPCrawler</h1>
+      <div class="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">就绪</span>
+      </div>
+    </header>
+    
+    <div class="main">
+      <aside class="sidebar">
+        <div class="section">
+          <div class="section-title">目标 URLs</div>
+          <textarea id="urls" placeholder="每行一个URL"></textarea>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">文件扩展名</div>
+          <div class="extensions" id="extensions">
+            <label><input type="checkbox" value=".html" checked> .html</label>
+            <label><input type="checkbox" value=".htm"> .htm</label>
+            <label><input type="checkbox" value=".md" checked> .md</label>
+            <label><input type="checkbox" value=".txt"> .txt</label>
+            <label><input type="checkbox" value=".pdf"> .pdf</label>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">存储设置</div>
+          <label>输出目录</label>
+          <input type="text" id="outputDir" value="./output">
+          <label>内容格式</label>
+          <select id="contentFormat">
+            <option value="markdown" selected>Markdown</option>
+            <option value="json">JSON</option>
+            <option value="txt">纯文本</option>
+          </select>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">爬取策略</div>
+          <label>请求间隔</label>
+          <select id="delay">
+            <option value="0.1">100ms</option>
+            <option value="0.2">200ms</option>
+            <option value="0.3">300ms</option>
+            <option value="0.4">400ms</option>
+            <option value="0.5" selected>500ms</option>
+            <option value="0.6">600ms</option>
+            <option value="0.7">700ms</option>
+            <option value="0.8">800ms</option>
+            <option value="0.9">900ms</option>
+          </select>
+          <label>最大深度</label>
+          <input type="number" id="maxDepth" value="1" min="1" max="10">
+          <label><input type="checkbox" id="recursive" checked> 递归爬取</label>
+        </div>
+      </aside>
+      
+      <main class="content">
+        <div class="topbar">
+          <h2>爬取控制</h2>
+          <div class="action-buttons">
+            <button class="btn btn-primary" id="startBtn">开始爬取</button>
+            <button class="btn btn-secondary" id="stopBtn" disabled>停止</button>
+            <button class="btn btn-danger" id="clearBtn">清空结果</button>
+          </div>
+        </div>
+        
+        <div class="progress" id="progressSection">
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-text" id="progressText">准备就绪</div>
+        </div>
+        
+        <div class="tabs">
+          <button class="tab active" data-tab="logs">日志</button>
+          <button class="tab" data-tab="files">文件列表</button>
+          <button class="tab" data-tab="result">结果</button>
+        </div>
+        
+        <div class="tab-content active" id="logs">
+          <div class="log-container" id="logContainer"><span class="log-info">等待开始爬取...</span></div>
+        </div>
+        
+        <div class="tab-content" id="files">
+          <div class="files-panel">
+            <div class="file-list" id="fileList"><div class="file-item"><span>暂无文件</span></div></div>
+            <div class="panel-resizer" id="panelResizer"></div>
+            <div class="preview-panel" id="previewPanel">
+              <div class="preview-header">
+                <span id="previewTitle">选择文件预览</span>
+                <button class="preview-open-btn" id="previewOpenBtn" style="display:none">打开原始URL</button>
+              </div>
+              <div class="preview-content" id="previewContent">单击左侧文件即可预览内容</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="tab-content" id="result">
+          <div class="result-cards">
+            <div class="result-card total"><div class="count" id="totalCount">0</div><div class="label">总计</div></div>
+            <div class="result-card new"><div class="count" id="newCount">0</div><div class="label">新增</div></div>
+            <div class="result-card updated"><div class="count" id="updatedCount">0</div><div class="label">更新</div></div>
+            <div class="result-card unchanged"><div class="count" id="unchangedCount">0</div><div class="label">未变</div></div>
+            <div class="result-card errors"><div class="count" id="errorCount">0</div><div class="label">错误</div></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>

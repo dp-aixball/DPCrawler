@@ -1,0 +1,176 @@
+"""
+Storage manager for DPCrawler - handles file metadata and indexing
+"""
+import os
+import json
+import hashlib
+from datetime import datetime
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional
+
+
+@dataclass
+class FileMeta:
+    """File metadata"""
+    md5: str
+    fetch_date: str
+    source_url: str
+    title: str
+    file_size: int
+    content_type: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FileMeta":
+        return cls(
+            md5=data.get("md5", ""),
+            fetch_date=data.get("fetch_date", ""),
+            source_url=data.get("source_url", ""),
+            title=data.get("title", ""),
+            file_size=data.get("file_size", 0),
+            content_type=data.get("content_type", ""),
+        )
+
+
+@dataclass
+class CrawlResult:
+    """Crawl result summary"""
+    success: bool
+    new_files: List[str]
+    updated_files: List[str]
+    deleted_files: List[str]
+    message: str
+
+
+class StorageManager:
+    """Manages file storage, metadata, and indexing"""
+
+    def __init__(self, output_dir: str, enable_meta: bool = True):
+        self.output_dir = output_dir
+        self.enable_meta = enable_meta
+        self.index: Dict[str, FileMeta] = {}
+        self._load_index()
+
+    def _load_index(self):
+        """Load existing index from disk"""
+        index_path = os.path.join(self.output_dir, "index.json")
+        if os.path.exists(index_path):
+            try:
+                with open(index_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for name, meta in data.get("file_tree", {}).items():
+                        self.index[name] = FileMeta.from_dict(meta)
+            except (json.JSONDecodeError, IOError):
+                pass
+
+    def _save_index(self, new_files: List[str], updated_files: List[str], deleted_files: List[str]):
+        """Save updated index to disk"""
+        index_path = os.path.join(self.output_dir, "index.json")
+        file_tree = {name: asdict(meta) for name, meta in self.index.items()}
+
+        data = {
+            "last_updated": datetime.now().isoformat(),
+            "total_files": len(self.index),
+            "new_files": new_files,
+            "updated_files": updated_files,
+            "deleted_files": deleted_files,
+            "file_tree": file_tree,
+        }
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        with open(index_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def compute_md5(content: str) -> str:
+        """Compute MD5 hash of content"""
+        return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+    def save_content(self, filename: str, content: str, source_url: str, title: str = "", content_type: str = "text/html", raw_html: str = "") -> Optional[str]:
+        """Save content and its metadata, returns file status: 'new', 'updated', 'unchanged', or None on error"""
+        try:
+            os.makedirs(self.output_dir, exist_ok=True)
+
+            # Compute file path and extension
+            ext = self._get_extension(content_type, filename)
+            base_filename = self._sanitize_filename(filename)
+            content_path = os.path.join(self.output_dir, f"{base_filename}{ext}")
+
+            # Compute MD5 from raw HTML (original content) for accurate change detection
+            md5_source = raw_html if raw_html else content
+            new_md5 = self.compute_md5(md5_source)
+
+            # Check if file is unchanged
+            if base_filename in self.index and self.index[base_filename].md5 == new_md5:
+                return "unchanged"
+
+            # Save content file
+            with open(content_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            file_size = os.path.getsize(content_path)
+
+            # Save metadata file
+            if self.enable_meta:
+                meta = FileMeta(
+                    md5=new_md5,
+                    fetch_date=datetime.now().isoformat(),
+                    source_url=source_url,
+                    title=title or base_filename,
+                    file_size=file_size,
+                    content_type=content_type,
+                )
+                meta_path = os.path.join(self.output_dir, f"{base_filename}.json")
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(asdict(meta), f, ensure_ascii=False, indent=2)
+
+            # Update index
+            was_new = base_filename not in self.index
+            self.index[base_filename] = FileMeta(
+                md5=new_md5,
+                fetch_date=datetime.now().isoformat(),
+                source_url=source_url,
+                title=title or base_filename,
+                file_size=file_size,
+                content_type=content_type,
+            )
+
+            return "new" if was_new else "updated"
+
+        except Exception as e:
+            print(f"Error saving {filename}: {e}")
+            return None
+
+    def finalize(self, new_files: List[str], updated_files: List[str], deleted_files: List[str]):
+        """Finalize crawl session, save index"""
+        self._save_index(new_files, updated_files, deleted_files)
+
+    @staticmethod
+    def _sanitize_filename(filename: str) -> str:
+        """Sanitize filename for filesystem"""
+        # Remove invalid characters
+        import re
+        filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
+        # Limit length
+        if len(filename) > 200:
+            filename = filename[:200]
+        return filename or "untitled"
+
+    @staticmethod
+    def _get_extension(content_type: str, filename: str) -> str:
+        """Determine file extension from content type or filename"""
+        content_type_map = {
+            "text/html": ".html",
+            "text/markdown": ".md",
+            "text/plain": ".txt",
+            "application/pdf": ".pdf",
+            "application/json": ".json",
+        }
+        if content_type in content_type_map:
+            return content_type_map[content_type]
+
+        # Try to extract from filename
+        if "." in filename:
+            ext = "." + filename.rsplit(".", 1)[-1]
+            if ext.lower() in [".html", ".htm", ".md", ".txt", ".pdf", ".doc", ".docx"]:
+                return ext.lower()
+        return ".html"
