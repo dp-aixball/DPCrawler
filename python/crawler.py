@@ -405,14 +405,15 @@ class WebCrawler:
                 if status == "new":
                     full_name = self.current_subdir + '/' + filename
                     self.new_files.append(full_name)
-                    print(f"  -> New: {filename}")
+                    print(f"  -> New: {full_name}")
                 elif status == "updated":
                     full_name = self.current_subdir + '/' + filename
                     self.updated_files.append(full_name)
-                    print(f"  -> Updated: {filename}")
+                    print(f"  -> Updated: {full_name}")
                 elif status == "unchanged":
                     self.unchanged_count += 1
-                    print(f"  -> Unchanged: {filename}")
+                    full_name = self.current_subdir + '/' + filename
+                    print(f"  -> Unchanged: {full_name}")
 
             # Collect sub-links for BFS queue
             if self.config.recursive and depth < self.config.max_depth:

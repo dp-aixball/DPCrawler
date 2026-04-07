@@ -77,6 +77,24 @@ function log(msg, type) {
   el.logContainer.scrollTop = el.logContainer.scrollHeight;
 }
 
+// File type icon using file-icon-vectors (classic style)
+function getFileTypeFromUrl(url) {
+  if (!url) return 'html';
+  try {
+    var pathname = new URL(url).pathname;
+    var dot = pathname.lastIndexOf('.');
+    if (dot !== -1) {
+      var ext = pathname.substring(dot + 1).toLowerCase();
+      if (ext && ext.length <= 4) return ext;
+    }
+  } catch(e) {}
+  return 'html';
+}
+
+function fileTypeIconHtml(ext) {
+  return '<span class="file-type-icon"><span class="fiv-cla fiv-icon-' + ext + '"></span></span>';
+}
+
 function addFileToList(name, status, url) {
   if (!name) return;
   crawledFiles.push({ name: name, status: status, url: url || '' });
@@ -106,7 +124,9 @@ function renderFileList() {
       subdir = f.name.substring(0, slashIdx);
       displayName = f.name.substring(slashIdx + 1);
     }
+    var fileExt = getFileTypeFromUrl(f.url);
     div.innerHTML = '<span class="file-badge ' + badgeClass + '">' + badgeText + '</span>' +
+      fileTypeIconHtml(fileExt) +
       (subdir ? '<span class="file-subdir">' + subdir + '</span>' : '') +
       '<span class="file-name">' + displayName + '</span>';
     (function(name, url, element) {

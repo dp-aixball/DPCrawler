@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DPCrawler - RAG知识爬虫</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/file-icon-vectors@1.0.0/dist/file-icon-classic.min.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -89,6 +90,8 @@
     .file-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #f3f4f6; border-left: 3px solid transparent; cursor: pointer; outline: none; }
     .file-item .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .file-item .file-subdir { font-size: 10px; color: #9ca3af; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; margin-right: 4px; flex-shrink: 0; white-space: nowrap; }
+    .file-item .file-type-icon { flex-shrink: 0; display: inline-flex; align-items: center; }
+    .file-item .file-type-icon .fiv-cla { font-size: 20px; line-height: 1; }
     .file-item .file-badge { flex-shrink: 0; }
     .file-item:hover { background: #f9fafb; }
     .file-item.selected { background: #dbeafe; border-left: 3px solid #3b82f6; font-weight: 500; }
