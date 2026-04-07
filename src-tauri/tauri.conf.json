@@ -5,7 +5,6 @@
   "identifier": "com.dpcrawler.app",
   "build": {
     "frontendDist": "../src",
-    "devUrl": "http://localhost:5173",
     "beforeDevCommand": "",
     "beforeBuildCommand": ""
   },

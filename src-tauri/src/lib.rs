@@ -45,7 +45,16 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
             let abs_config = root.join(&config_path);
             let crawler_file = root.join("python").join("crawler.py");
 
-            let mut child = Command::new("python3")
+            let mut python_cmd = "python3".to_string();
+            let venv_mac = root.join(".venv").join("bin").join("python3");
+            let venv_win = root.join(".venv").join("Scripts").join("python.exe");
+            if venv_mac.exists() { 
+                python_cmd = venv_mac.to_string_lossy().to_string(); 
+            } else if venv_win.exists() { 
+                python_cmd = venv_win.to_string_lossy().to_string(); 
+            }
+
+            let mut child = Command::new(&python_cmd)
                 .current_dir(&root)
                 .arg(&crawler_file)
                 .arg(&abs_config)

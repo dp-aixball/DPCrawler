@@ -239,8 +239,9 @@ function resetUI() {
 }
 
 function simpleMarkdown(text) {
-  // Escape HTML
+  // Escape HTML but allow <br> tags
   var s = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  s = s.replace(/&lt;br&gt;/gi, '<br>');  // Restore <br> for table cell line breaks
   // Headers
   s = s.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
   s = s.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
@@ -253,8 +254,8 @@ function simpleMarkdown(text) {
   s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
   // Links
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" title="$2">$1</a>');
-  // Images
-  s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%">');
+  // Images (disabled for RAG preview)
+  // s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%">');
   // Horizontal rule
   s = s.replace(/^---+$/gm, '<hr>');
   // Tables: detect lines with | separators

@@ -115,7 +115,9 @@ class WebCrawler:
             merge_end = 1
             while merge_end < len(lines):
                 stripped = lines[merge_end].strip()
-                if stripped == '' or stripped == '>' or (len(stripped) < 20 and not any(c in stripped for c in '。，；、（）')):
+                # compute logical text length ignoring URL parts of markdown links
+                text_only = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', stripped)
+                if stripped == '' or text_only == '>' or text_only == '\>' or (len(text_only) < 30 and not any(c in text_only for c in '。，；')):
                     if stripped:
                         breadcrumb += ' ' + stripped
                     merge_end += 1
@@ -146,19 +148,66 @@ class WebCrawler:
 
     def _table_to_markdown(self, table) -> str:
         """Convert a BeautifulSoup <table> element directly to Markdown table format.
-        This is more reliable than html2text for complex/styled tables."""
-        rows = []
-        for tr in table.find_all('tr'):
-            cells = []
+        This is more reliable than html2text for complex/styled tables.
+        Uses a 2D grid to correctly handle rowspan and colspan alignment."""
+        grid = {}
+        max_col = -1
+        max_row = -1
+        
+        trs = table.find_all('tr')
+        for r_idx, tr in enumerate(trs):
+            c_idx = 0
             for cell in tr.find_all(['td', 'th']):
+                # Find next available column slot in this row
+                while grid.get((r_idx, c_idx)) is not None:
+                    c_idx += 1
+                
+                # Preserve line breaks for markdown cells
+                for br in cell.find_all(['br', 'hr']):
+                    br.replace_with(' <br> ')
+                for p_div in cell.find_all(['p', 'div']):
+                    p_div.insert_after(' <br> ')
+                    p_div.unwrap()
+                
                 # Get pure text, collapse whitespace
                 text = cell.get_text(strip=True)
                 text = re.sub(r'\s+', ' ', text)
+                
+                # Clean up redundant <br> tags
+                text = re.sub(r'(<br>\s*)+', '<br>', text)
+                text = text.strip('<br>').strip()
+                
                 # Escape pipe characters inside cell text
                 text = text.replace('|', '\\|')
-                cells.append(text)
-            if cells:
-                rows.append(cells)
+                
+                # Handle cell spanning
+                try:
+                    colspan = int(cell.get('colspan', 1))
+                except (ValueError, TypeError):
+                    colspan = 1
+                try:
+                    rowspan = int(cell.get('rowspan', 1))
+                except (ValueError, TypeError):
+                    rowspan = 1
+                    
+                # Fill grid with cell content and empty spans
+                for r in range(r_idx, r_idx + rowspan):
+                    for c in range(c_idx, c_idx + colspan):
+                        grid[(r, c)] = text if (r == r_idx and c == c_idx) else ""
+                        max_col = max(max_col, c)
+                        max_row = max(max_row, r)
+                
+                c_idx += colspan
+
+        if max_row < 0 or max_col < 0:
+            return ""
+
+        rows = []
+        for r in range(max_row + 1):
+            row = []
+            for c in range(max_col + 1):
+                row.append(grid.get((r, c), ""))
+            rows.append(row)
 
         if not rows:
             return ''
@@ -181,25 +230,23 @@ class WebCrawler:
 
         return '\n'.join(lines)
 
-    def _convert_tables_to_markdown(self, html: str) -> str:
+    def _convert_tables_to_markdown(self, html: str) -> tuple:
         """Replace all <table> elements in HTML with their Markdown equivalents.
         This ensures tables are correctly formatted regardless of html2text behavior."""
         soup = BeautifulSoup(html, "html.parser")
-        for table in soup.find_all('table'):
+        placeholders = {}
+        for i, table in enumerate(soup.find_all('table')):
             md_table = self._table_to_markdown(table)
             if md_table:
-                # Replace the table with a marker that html2text won't touch
-                # Use <pre> to prevent html2text from reformatting
-                marker = soup.new_tag('pre')
-                marker.string = '\n' + md_table + '\n'
+                # Replace the table with a text placeholder to be swapped after html2text
+                placeholder_key = f"___TABLE_PLACEHOLDER_{i}___"
+                placeholders[placeholder_key] = md_table
+                
+                marker = soup.new_string(f"\n\n{placeholder_key}\n\n")
                 table.replace_with(marker)
             else:
                 table.decompose()
-        return str(soup)
-
-    def _clean_html_tables(self, html: str) -> str:
-        """Pre-process HTML: convert tables to markdown, strip nested style tags from remaining"""
-        return self._convert_tables_to_markdown(html)
+        return str(soup), placeholders
 
     def _clean_html_inline_tags(self, html: str) -> str:
         """Clean HTML at DOM level: unwrap meaningless inline tags.
@@ -208,37 +255,43 @@ class WebCrawler:
         """
         soup = BeautifulSoup(html, "html.parser")
 
-        # Unwrap inline style tags that carry no semantic meaning
-        for tag_name in ['span', 'font']:
+        # Unwrap inline style tags that carry no semantic meaning for RAG
+        for tag_name in ['span', 'font', 'u', 'b', 'strong', 'i', 'em']:
             for tag in soup.find_all(tag_name):
                 tag.unwrap()
 
-        # Flatten nested <p> inside <p> (CMS sometimes nests them)
-        for p in soup.find_all('p'):
-            for inner_p in p.find_all('p'):
-                inner_p.unwrap()
+        # Removed the logic that flattens <p> inside <p> as it destroys line breaks.
+        # html2text natively handles nested blocks very well.
 
         return str(soup)
 
     def html_to_markdown(self, html: str, base_url: str = "") -> str:
         """Convert HTML to Markdown format"""
         # Clean up complex table cells before conversion
-        html = self._clean_html_tables(html)
+        html, table_placeholders = self._convert_tables_to_markdown(html)
         # Remove meaningless inline tags that cause unwanted line breaks
         html = self._clean_html_inline_tags(html)
+        
+        result_md = ""
         if HTML2TEXT_AVAILABLE:
             h = html2text.HTML2Text()
             h.baseurl = base_url
             h.ignore_links = False
-            h.ignore_images = False
+            h.ignore_images = True   # Removed images for RAG optimization
             h.body_width = 0  # Don't wrap lines
             h.bypass_tables = False
             h.pad_tables = True  # Pad table cells for alignment
-            return h.handle(html)
+            result_md = h.handle(html)
         else:
             # Fallback: simple HTML tag removal
             soup = BeautifulSoup(html, "html.parser")
-            return soup.get_text(separator="\n", strip=True)
+            result_md = soup.get_text(separator="\n", strip=True)
+            
+        # Restore tables from placeholders
+        for placeholder, md_table in table_placeholders.items():
+            result_md = result_md.replace(placeholder, "\n\n" + md_table + "\n\n")
+            
+        return result_md
 
     def extract_title(self, soup: BeautifulSoup) -> str:
         """Extract title from HTML page"""
@@ -287,71 +340,93 @@ class WebCrawler:
 
         print(f"[{depth}] ({count}/{self.MAX_PAGES}) Crawling: {url}")
 
-        try:
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            # Fix encoding: use apparent_encoding if requests guessed wrong
-            if response.encoding and response.encoding.lower() == 'iso-8859-1':
-                response.encoding = response.apparent_encoding
-
-            content_type = response.headers.get("Content-Type", "text/html").split(";")[0].strip()
-
-            # Process based on content type
-            if "text/html" in content_type:
-                soup = BeautifulSoup(response.text, "html.parser")
-                title = self.extract_title(soup)
-
-                # Convert to markdown for RAG
-                raw_content = self.html_to_markdown(response.text, url)
-                # Extract main body content (remove nav/footer)
-                content = self.extract_body_content(raw_content)
-                # Prepend source URL to content
-                content = f"> 来源: {url}\n\n{content}"
-
-                # Generate filename from URL
-                parsed = urlparse(url)
-                filename = re.sub(r"[^\w\-]", "_", parsed.path.strip("/").replace("/", "_") or "index")
-
-                # Save content (thread-safe via lock)
-                with self._lock:
-                    status = self.storage.save_content(
-                        filename=filename,
-                        content=content,
-                        source_url=url,
-                        title=title,
-                        content_type="text/markdown",
-                        raw_html=response.text
-                    )
-
-                    if status == "new":
-                        full_name = self.current_subdir + '/' + filename
-                        self.new_files.append(full_name)
-                        print(f"  -> New: {filename}")
-                    elif status == "updated":
-                        full_name = self.current_subdir + '/' + filename
-                        self.updated_files.append(full_name)
-                        print(f"  -> Updated: {filename}")
-                    elif status == "unchanged":
-                        self.unchanged_count += 1
-                        print(f"  -> Unchanged: {filename}")
-
-                # Collect sub-links for BFS queue
-                if self.config.recursive and depth < self.config.max_depth:
-                    links = self.extract_links(soup, url)
+        MAX_RETRIES = 3
+        response = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = self.session.get(url, timeout=30)
+                # Fail fast on 404, don't retry
+                if response.status_code == 404:
+                    response.raise_for_status()
+                    
+                response.raise_for_status()
+                break  # Success
+            except requests.RequestException as e:
+                # If it's a client error (e.g. 404), don't retry
+                if hasattr(e, 'response') and e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
                     with self._lock:
-                        for link in links:
-                            link_norm = self._normalize_url(link)
-                            if link_norm not in self.visited_urls and link_norm not in self.url_depths:
-                                self.url_depths[link_norm] = depth + 1
-                                self.bfs_queue.append(link)
+                        self.error_count += 1
+                    print(f"  -> Error: {e}")
+                    return False
+                    
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = 2 * (attempt + 1)
+                    print(f"  -> Retry {attempt+1}/{MAX_RETRIES} for {url} (Wait {wait_time}s) due to error...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    with self._lock:
+                        self.error_count += 1
+                    print(f"  -> Error after {MAX_RETRIES} tries: {e}")
+                    return False
+        # Fix encoding: use apparent_encoding if requests guessed wrong
+        if response.encoding and response.encoding.lower() == 'iso-8859-1':
+            response.encoding = response.apparent_encoding
 
-            return True
+        content_type = response.headers.get("Content-Type", "text/html").split(";")[0].strip()
 
-        except requests.RequestException as e:
+        # Process based on content type
+        if "text/html" in content_type:
+            soup = BeautifulSoup(response.text, "html.parser")
+            title = self.extract_title(soup)
+
+            # Convert to markdown for RAG
+            raw_content = self.html_to_markdown(response.text, url)
+            # Extract main body content (remove nav/footer)
+            content = self.extract_body_content(raw_content)
+            # Prepend source URL to content
+            content = f"> 来源: {url}\n\n{content}"
+
+            # Generate filename from URL
+            parsed = urlparse(url)
+            filename = re.sub(r"[^\w\-]", "_", parsed.path.strip("/").replace("/", "_") or "index")
+
+            # Save content (thread-safe via lock)
             with self._lock:
-                self.error_count += 1
-            print(f"  -> Error: {e}")
-            return False
+                status = self.storage.save_content(
+                    filename=filename,
+                    content=content,
+                    source_url=url,
+                    title=title,
+                    content_type="text/markdown",
+                    raw_html=response.text
+                )
+
+                if status == "new":
+                    full_name = self.current_subdir + '/' + filename
+                    self.new_files.append(full_name)
+                    print(f"  -> New: {filename}")
+                elif status == "updated":
+                    full_name = self.current_subdir + '/' + filename
+                    self.updated_files.append(full_name)
+                    print(f"  -> Updated: {filename}")
+                elif status == "unchanged":
+                    self.unchanged_count += 1
+                    print(f"  -> Unchanged: {filename}")
+
+            # Collect sub-links for BFS queue
+            if self.config.recursive and depth < self.config.max_depth:
+                links = self.extract_links(soup, url)
+                with self._lock:
+                    for link in links:
+                        link_norm = self._normalize_url(link)
+                        if link_norm not in self.visited_urls and link_norm not in self.url_depths:
+                            self.url_depths[link_norm] = depth + 1
+                            self.bfs_queue.append(link)
+
+        return True
+
+        # Exception handled inside retry loop
 
     def _get_delay(self) -> float:
         """Get current delay, checking for real-time updates from .crawl_delay file"""
