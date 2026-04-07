@@ -85,7 +85,7 @@ function getFileTypeFromUrl(url) {
     var dot = pathname.lastIndexOf('.');
     if (dot !== -1) {
       var ext = pathname.substring(dot + 1).toLowerCase();
-      if (ext && ext.length <= 4) return ext;
+      if (ext && ext.length <= 5) return ext;
     }
   } catch(e) {}
   return 'html';

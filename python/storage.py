@@ -159,18 +159,37 @@ class StorageManager:
     def _get_extension(content_type: str, filename: str) -> str:
         """Determine file extension from content type or filename"""
         content_type_map = {
+            # Web
             "text/html": ".html",
             "text/markdown": ".md",
             "text/plain": ".txt",
-            "application/pdf": ".pdf",
+            "text/csv": ".csv",
+            "text/xml": ".xml",
             "application/json": ".json",
+            "application/xml": ".xml",
+            # Documents
+            "application/pdf": ".pdf",
+            "application/msword": ".doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.ms-excel": ".xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+            "application/vnd.ms-powerpoint": ".ppt",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+            "application/rtf": ".rtf",
+            "application/epub+zip": ".epub",
         }
         if content_type in content_type_map:
             return content_type_map[content_type]
 
         # Try to extract from filename
+        known_exts = {
+            ".html", ".htm", ".md", ".txt", ".csv", ".xml", ".json",
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".rtf", ".odt", ".ods", ".odp", ".epub", ".mobi",
+            ".tex", ".latex", ".rst", ".log", ".yaml", ".yml",
+        }
         if "." in filename:
             ext = "." + filename.rsplit(".", 1)[-1]
-            if ext.lower() in [".html", ".htm", ".md", ".txt", ".pdf", ".doc", ".docx"]:
+            if ext.lower() in known_exts:
                 return ext.lower()
         return ".html"

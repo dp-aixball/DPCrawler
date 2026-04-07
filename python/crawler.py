@@ -14,11 +14,33 @@ import re
 
 import requests
 from bs4 import BeautifulSoup
+import io
 try:
     import html2text
     HTML2TEXT_AVAILABLE = True
 except ImportError:
     HTML2TEXT_AVAILABLE = False
+
+# Optional imports for document conversion (graceful degradation)
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
+
+try:
+    import docx as python_docx
+except ImportError:
+    python_docx = None
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+try:
+    from pptx import Presentation as PptxPresentation
+except ImportError:
+    PptxPresentation = None
 
 from config import CrawlerConfig
 from storage import StorageManager, CrawlResult
@@ -28,7 +50,7 @@ from dataclasses import asdict
 class WebCrawler:
     """Web crawler for RAG knowledge collection"""
 
-    MAX_PAGES = 200  # Maximum pages per crawl session
+    MAX_PAGES = 500  # Maximum pages per crawl session
 
     CONCURRENT_WORKERS = 8  # Parallel crawl workers
 
@@ -293,6 +315,183 @@ class WebCrawler:
             
         return result_md
 
+    # ---- Document format converters ----
+
+    @staticmethod
+    def pdf_to_markdown(data: bytes) -> str:
+        """Convert PDF binary data to Markdown text"""
+        if pdfplumber is None:
+            return "[PDF conversion unavailable: install pdfplumber]"
+        lines = []
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            for i, page in enumerate(pdf.pages):
+                # Extract tables
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        if not table:
+                            continue
+                        # Build MD table
+                        max_cols = max(len(row) for row in table if row)
+                        header = table[0] if table else []
+                        header = [(c or '').strip().replace('\n', ' ').replace('|', '\\|') for c in header]
+                        while len(header) < max_cols:
+                            header.append('')
+                        lines.append('| ' + ' | '.join(header) + ' |')
+                        lines.append('| ' + ' | '.join(['---'] * max_cols) + ' |')
+                        for row in table[1:]:
+                            if not row:
+                                continue
+                            cells = [(c or '').strip().replace('\n', ' ').replace('|', '\\|') for c in row]
+                            while len(cells) < max_cols:
+                                cells.append('')
+                            lines.append('| ' + ' | '.join(cells) + ' |')
+                        lines.append('')
+                else:
+                    text = page.extract_text()
+                    if text:
+                        lines.append(text)
+                        lines.append('')
+        return '\n'.join(lines).strip()
+
+    @staticmethod
+    def docx_to_markdown(data: bytes) -> str:
+        """Convert DOCX binary data to Markdown text"""
+        if python_docx is None:
+            return "[DOCX conversion unavailable: install python-docx]"
+        doc = python_docx.Document(io.BytesIO(data))
+        lines = []
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if not text:
+                lines.append('')
+                continue
+            style = para.style.name.lower() if para.style else ''
+            if 'heading 1' in style:
+                lines.append(f'# {text}')
+            elif 'heading 2' in style:
+                lines.append(f'## {text}')
+            elif 'heading 3' in style:
+                lines.append(f'### {text}')
+            elif 'heading 4' in style:
+                lines.append(f'#### {text}')
+            elif 'list' in style:
+                lines.append(f'- {text}')
+            else:
+                lines.append(text)
+            lines.append('')
+        # Convert tables
+        for table in doc.tables:
+            rows = []
+            for row in table.rows:
+                cells = [cell.text.strip().replace('\n', ' ').replace('|', '\\|') for cell in row.cells]
+                rows.append(cells)
+            if rows:
+                max_cols = max(len(r) for r in rows)
+                for r in rows:
+                    while len(r) < max_cols:
+                        r.append('')
+                lines.append('| ' + ' | '.join(rows[0]) + ' |')
+                lines.append('| ' + ' | '.join(['---'] * max_cols) + ' |')
+                for r in rows[1:]:
+                    lines.append('| ' + ' | '.join(r) + ' |')
+                lines.append('')
+        return '\n'.join(lines).strip()
+
+    @staticmethod
+    def xlsx_to_markdown(data: bytes) -> str:
+        """Convert XLSX binary data to Markdown tables"""
+        if openpyxl is None:
+            return "[XLSX conversion unavailable: install openpyxl]"
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        lines = []
+        for sheet in wb.worksheets:
+            lines.append(f'## {sheet.title}')
+            lines.append('')
+            rows = []
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(c).strip().replace('\n', ' ').replace('|', '\\|') if c is not None else '' for c in row]
+                # Skip fully empty rows
+                if not any(cells):
+                    continue
+                # Skip merged title rows (only 1-2 cells have content, rest are empty)
+                non_empty = sum(1 for c in cells if c)
+                if non_empty <= 2 and len(cells) > 4:
+                    # Treat as a title line, not a table row
+                    title_text = ' '.join(c for c in cells if c)
+                    if title_text:
+                        lines.append(f'**{title_text}**')
+                        lines.append('')
+                    continue
+                rows.append(cells)
+            if rows:
+                max_cols = max(len(r) for r in rows)
+                for r in rows:
+                    while len(r) < max_cols:
+                        r.append('')
+                lines.append('| ' + ' | '.join(rows[0]) + ' |')
+                lines.append('| ' + ' | '.join(['---'] * max_cols) + ' |')
+                for r in rows[1:]:
+                    lines.append('| ' + ' | '.join(r) + ' |')
+            lines.append('')
+        wb.close()
+        return '\n'.join(lines).strip()
+
+    @staticmethod
+    def pptx_to_markdown(data: bytes) -> str:
+        """Convert PPTX binary data to Markdown text"""
+        if PptxPresentation is None:
+            return "[PPTX conversion unavailable: install python-pptx]"
+        prs = PptxPresentation(io.BytesIO(data))
+        lines = []
+        for i, slide in enumerate(prs.slides, 1):
+            lines.append(f'## Slide {i}')
+            lines.append('')
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        text = para.text.strip()
+                        if text:
+                            lines.append(text)
+                if shape.has_table:
+                    table = shape.table
+                    rows = []
+                    for row in table.rows:
+                        cells = [cell.text.strip().replace('\n', ' ').replace('|', '\\|') for cell in row.cells]
+                        rows.append(cells)
+                    if rows:
+                        max_cols = max(len(r) for r in rows)
+                        for r in rows:
+                            while len(r) < max_cols:
+                                r.append('')
+                        lines.append('| ' + ' | '.join(rows[0]) + ' |')
+                        lines.append('| ' + ' | '.join(['---'] * max_cols) + ' |')
+                        for r in rows[1:]:
+                            lines.append('| ' + ' | '.join(r) + ' |')
+            lines.append('')
+        return '\n'.join(lines).strip()
+
+    # Content type to converter mapping
+    BINARY_CONVERTERS = {
+        'application/pdf': ('pdf_to_markdown', '.pdf'),
+        'application/msword': ('docx_to_markdown', '.doc'),
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ('docx_to_markdown', '.docx'),
+        'application/vnd.ms-excel': ('xlsx_to_markdown', '.xls'),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ('xlsx_to_markdown', '.xlsx'),
+        'application/vnd.ms-powerpoint': ('pptx_to_markdown', '.ppt'),
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': ('pptx_to_markdown', '.pptx'),
+    }
+
+    # Text types that can be stored as-is (wrapped in MD code block or plain)
+    PLAINTEXT_TYPES = {
+        'text/plain', 'text/csv', 'text/xml', 'application/json',
+        'application/xml', 'text/markdown', 'application/rtf',
+    }
+
+    # URL extensions for binary files
+    BINARY_EXTENSIONS = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'}
+    PLAINTEXT_EXTENSIONS = {'.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.md', '.rst', '.tex', '.log', '.rtf'}
+
     def extract_title(self, soup: BeautifulSoup) -> str:
         """Extract title from HTML page"""
         # Try h1 first
@@ -374,56 +573,109 @@ class WebCrawler:
             response.encoding = response.apparent_encoding
 
         content_type = response.headers.get("Content-Type", "text/html").split(";")[0].strip()
+        # Detect extension from URL for fallback
+        url_ext = os.path.splitext(urlparse(url).path)[1].lower()
 
-        # Process based on content type
-        if "text/html" in content_type:
+        # Generate filename from URL
+        parsed = urlparse(url)
+        filename = re.sub(r"[^\w\-]", "_", parsed.path.strip("/").replace("/", "_") or "index")
+
+        content = None
+        title = "Untitled"
+        raw_html = None
+        sub_links = []
+
+        # --- 1. HTML ---
+        if "text/html" in content_type and url_ext not in self.BINARY_EXTENSIONS:
             soup = BeautifulSoup(response.text, "html.parser")
             title = self.extract_title(soup)
-
-            # Convert to markdown for RAG
+            raw_html = response.text
             raw_content = self.html_to_markdown(response.text, url)
-            # Extract main body content (remove nav/footer)
             content = self.extract_body_content(raw_content)
-            # Prepend source URL to content
-            content = f"> 来源: {url}\n\n{content}"
-
-            # Generate filename from URL
-            parsed = urlparse(url)
-            filename = re.sub(r"[^\w\-]", "_", parsed.path.strip("/").replace("/", "_") or "index")
-
-            # Save content (thread-safe via lock)
-            with self._lock:
-                status = self.storage.save_content(
-                    filename=filename,
-                    content=content,
-                    source_url=url,
-                    title=title,
-                    content_type="text/markdown",
-                    raw_html=response.text
-                )
-
-                if status == "new":
-                    full_name = self.current_subdir + '/' + filename
-                    self.new_files.append(full_name)
-                    print(f"  -> New: {full_name}")
-                elif status == "updated":
-                    full_name = self.current_subdir + '/' + filename
-                    self.updated_files.append(full_name)
-                    print(f"  -> Updated: {full_name}")
-                elif status == "unchanged":
-                    self.unchanged_count += 1
-                    full_name = self.current_subdir + '/' + filename
-                    print(f"  -> Unchanged: {full_name}")
-
             # Collect sub-links for BFS queue
             if self.config.recursive and depth < self.config.max_depth:
-                links = self.extract_links(soup, url)
-                with self._lock:
-                    for link in links:
-                        link_norm = self._normalize_url(link)
-                        if link_norm not in self.visited_urls and link_norm not in self.url_depths:
-                            self.url_depths[link_norm] = depth + 1
-                            self.bfs_queue.append(link)
+                sub_links = self.extract_links(soup, url)
+
+        # --- 2. Binary document (PDF/DOCX/XLSX/PPTX) ---
+        elif content_type in self.BINARY_CONVERTERS or url_ext in self.BINARY_EXTENSIONS:
+            converter_name = None
+            if content_type in self.BINARY_CONVERTERS:
+                converter_name, _ = self.BINARY_CONVERTERS[content_type]
+            else:
+                # Fallback: match by URL extension
+                for ct, (cn, ext) in self.BINARY_CONVERTERS.items():
+                    if ext == url_ext:
+                        converter_name = cn
+                        break
+            if converter_name:
+                try:
+                    converter = getattr(self, converter_name)
+                    content = converter(response.content)
+                    # Use filename as title for binary docs
+                    title = os.path.basename(parsed.path) or filename
+                except Exception as e:
+                    print(f"  -> Conversion error ({url_ext}): {e}")
+                    return False
+            else:
+                print(f"  -> Skipped (unsupported binary: {content_type})")
+                return False
+
+        # --- 3. Plain text types (txt/csv/json/xml/yaml/md/rst/tex/log) ---
+        elif content_type in self.PLAINTEXT_TYPES or url_ext in self.PLAINTEXT_EXTENSIONS:
+            text = response.text.strip()
+            title = os.path.basename(parsed.path) or filename
+            # Wrap structured text in code blocks for readability
+            if url_ext in {'.json', '.xml', '.yaml', '.yml', '.csv'}:
+                lang = url_ext.lstrip('.')
+                if lang == 'yml':
+                    lang = 'yaml'
+                content = f"```{lang}\n{text}\n```"
+            else:
+                content = text
+
+        else:
+            # Unsupported content type, skip
+            print(f"  -> Skipped (unsupported: {content_type})")
+            return False
+
+        if content is None:
+            return False
+
+        # Prepend source URL
+        content = f"> 来源: {url}\n\n{content}"
+
+        # Save content (thread-safe via lock)
+        with self._lock:
+            status = self.storage.save_content(
+                filename=filename,
+                content=content,
+                source_url=url,
+                title=title,
+                content_type="text/markdown",
+                raw_html=raw_html
+            )
+
+            if status == "new":
+                full_name = self.current_subdir + '/' + filename
+                self.new_files.append(full_name)
+                print(f"  -> New: {full_name}")
+            elif status == "updated":
+                full_name = self.current_subdir + '/' + filename
+                self.updated_files.append(full_name)
+                print(f"  -> Updated: {full_name}")
+            elif status == "unchanged":
+                self.unchanged_count += 1
+                full_name = self.current_subdir + '/' + filename
+                print(f"  -> Unchanged: {full_name}")
+
+        # Add sub-links to BFS queue (only from HTML pages)
+        if sub_links:
+            with self._lock:
+                for link in sub_links:
+                    link_norm = self._normalize_url(link)
+                    if link_norm not in self.visited_urls and link_norm not in self.url_depths:
+                        self.url_depths[link_norm] = depth + 1
+                        self.bfs_queue.append(link)
 
         return True
 

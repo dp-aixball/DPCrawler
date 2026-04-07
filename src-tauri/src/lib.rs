@@ -45,14 +45,13 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
             let abs_config = root.join(&config_path);
             let crawler_file = root.join("python").join("crawler.py");
 
-            let mut python_cmd = "python3".to_string();
-            let venv_mac = root.join(".venv").join("bin").join("python3");
-            let venv_win = root.join(".venv").join("Scripts").join("python.exe");
-            if venv_mac.exists() { 
-                python_cmd = venv_mac.to_string_lossy().to_string(); 
-            } else if venv_win.exists() { 
-                python_cmd = venv_win.to_string_lossy().to_string(); 
-            }
+            // Prefer venv Python, fallback to system python3
+            let venv_python = root.join(".venv").join("bin").join("python3");
+            let python_cmd = if venv_python.exists() {
+                venv_python.to_string_lossy().to_string()
+            } else {
+                "python3".to_string()
+            };
 
             let mut child = Command::new(&python_cmd)
                 .current_dir(&root)
@@ -185,7 +184,7 @@ fn write_config(config_path: String, content: String) -> Result<(), String> {
 fn read_file_content(output_dir: String, filename: String) -> Result<String, String> {
     let base = resolve_path(&output_dir);
     // filename may contain subdir like "www.example.com/page_name"
-    for ext in &[".md", ".html", ".txt"] {
+    for ext in &[".md", ".html", ".htm", ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".xml", ".json", ".rtf", ".odt", ".epub", ".rst", ".yaml", ".yml", ".log", ".tex"] {
         let path = base.join(format!("{}{}", filename, ext));
         if path.exists() {
             return std::fs::read_to_string(&path)
@@ -262,13 +261,7 @@ pub fn run() {
             update_delay,
             clear_output
         ])
-        .setup(|app| {
-            #[cfg(debug_assertions)]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools();
-                }
-            }
+        .setup(|_app| {
             Ok(())
         })
         .run(tauri::generate_context!())
