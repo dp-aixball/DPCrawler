@@ -178,6 +178,7 @@
           <div class="section-title">爬取策略</div>
           <label>请求间隔</label>
           <select id="delay">
+            <option value="0">0ms</option>
             <option value="0.1">100ms</option>
             <option value="0.2">200ms</option>
             <option value="0.3">300ms</option>
@@ -189,7 +190,14 @@
             <option value="0.9">900ms</option>
           </select>
           <label>最大深度</label>
-          <input type="number" id="maxDepth" value="1" min="1" max="10">
+          <select id="maxDepth">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="999">不限制</option>
+          </select>
           <label><input type="checkbox" id="recursive" checked> 递归爬取</label>
         </div>
       </aside>
@@ -198,6 +206,7 @@
         <div class="topbar">
           <h2>爬取控制</h2>
           <div class="action-buttons">
+            <button class="btn btn-secondary" id="preCrawlBtn">全站预爬</button>
             <button class="btn btn-primary" id="startBtn">开始爬取</button>
             <button class="btn btn-secondary" id="stopBtn" disabled>停止</button>
             <button class="btn btn-danger" id="clearBtn">清空结果</button>

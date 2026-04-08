@@ -50,7 +50,7 @@ from dataclasses import asdict
 class WebCrawler:
     """Web crawler for RAG knowledge collection"""
 
-    MAX_PAGES = 500  # Maximum pages per crawl session
+    MAX_PAGES = 10000  # Maximum pages per crawl session
 
     CONCURRENT_WORKERS = 8  # Parallel crawl workers
 
@@ -706,6 +706,155 @@ class WebCrawler:
         parsed = urlparse(url)
         return parsed.netloc or 'default'
 
+    def pre_crawl(self) -> dict:
+        """Pre-crawl: BFS discovery of all URLs without downloading/storing content.
+        Returns depth statistics for progress estimation."""
+        print(f"Pre-crawl: discovering URLs from {len(self.config.urls)} seed(s) ({self.CONCURRENT_WORKERS} workers)")
+        self.base_urls = list(self.config.urls)
+
+        discovered = {}  # url -> depth
+        visited = set()
+        lock = threading.Lock()
+        self._pre_crawl_stopped = False  # graceful stop flag
+
+        def _handle_stop(signum, frame):
+            print("\n[pre-crawl] Stop requested, saving current stats...")
+            self._pre_crawl_stopped = True
+
+        import signal
+        signal.signal(signal.SIGTERM, _handle_stop)
+
+        def sniff_worker(url: str, depth: int):
+            """Fetch HTML page, extract links. Skip binary files."""
+            norm = self._normalize_url(url)
+            with lock:
+                if norm in visited:
+                    return []
+                visited.add(norm)
+
+            # Check if URL passes scope + extension filter
+            if not self.should_process_url(norm):
+                return []
+
+            # For binary file URLs, just count them - don't fetch
+            url_ext = os.path.splitext(urlparse(url).path)[1].lower()
+            if url_ext in self.BINARY_EXTENSIONS:
+                with lock:
+                    discovered[norm] = depth
+                count = len(discovered)
+                print(f"  [pre-crawl] depth={depth} found={count} (doc) {url}")
+                return []
+
+            # Fetch HTML pages to extract links
+            try:
+                resp = self.session.get(url, timeout=15)
+                resp.raise_for_status()
+            except Exception:
+                return []
+
+            content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if "text/html" not in content_type:
+                # Non-HTML text file - count it but don't parse for links
+                with lock:
+                    discovered[norm] = depth
+                count = len(discovered)
+                print(f"  [pre-crawl] depth={depth} found={count} {url}")
+                return []
+
+            # HTML page: count it and extract links
+            with lock:
+                discovered[norm] = depth
+            count = len(discovered)
+            print(f"  [pre-crawl] depth={depth} found={count} {url}")
+
+            if resp.encoding and resp.encoding.lower() == 'iso-8859-1':
+                resp.encoding = resp.apparent_encoding
+            soup = BeautifulSoup(resp.text, "html.parser")
+            child_links = []
+            for link in self.extract_links(soup, url):
+                link_norm = self._normalize_url(link)
+                with lock:
+                    if link_norm not in visited and link_norm not in discovered:
+                        child_links.append((link, depth + 1))
+            return child_links
+
+        def _build_result() -> dict:
+            """Build statistics from current discovered state."""
+            max_depth = max(discovered.values()) if discovered else 0
+            urls_per_depth = {}
+            for d in range(max_depth + 1):
+                urls_per_depth[str(d)] = sum(1 for v in discovered.values() if v == d)
+            by_depth = {}
+            cumulative = 0
+            for d in range(max_depth + 1):
+                cumulative += urls_per_depth.get(str(d), 0)
+                by_depth[str(d)] = cumulative
+            return {
+                "total": len(discovered),
+                "by_depth": by_depth,
+                "urls_per_depth": urls_per_depth,
+                "max_depth": max_depth,
+                "urls": list(discovered.keys()),
+            }
+
+        try:
+            for seed_url in self.config.urls:
+                if self._pre_crawl_stopped:
+                    break
+                print(f"\nPre-crawling from: {seed_url}")
+                queue = deque([(seed_url, 0)])
+
+                with ThreadPoolExecutor(max_workers=self.CONCURRENT_WORKERS) as executor:
+                    active = set()
+
+                    while True:
+                        if self._pre_crawl_stopped:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+                        # Submit from queue
+                        while queue and len(active) < self.CONCURRENT_WORKERS:
+                            url, depth = queue.popleft()
+                            future = executor.submit(sniff_worker, url, depth)
+                            future._depth = depth
+                            active.add(future)
+
+                        if not active:
+                            if not queue:
+                                break
+                            continue
+
+                        # Wait for one completion
+                        done = set()
+                        for f in as_completed(active):
+                            done.add(f)
+                            break
+                        active -= done
+
+                        for f in done:
+                            try:
+                                child_links = f.result()
+                                for link, d in child_links:
+                                    queue.append((link, d))
+                            except Exception:
+                                pass
+
+                        time.sleep(0.05)  # light throttle
+
+        except Exception as e:
+            print(f"Pre-crawl error: {e}")
+
+        result = _build_result()
+        was_stopped = self._pre_crawl_stopped
+
+        if was_stopped:
+            print(f"\nPre-crawl stopped early: {len(discovered)} URLs, max depth {result['max_depth']}")
+        else:
+            print(f"\nPre-crawl complete: {len(discovered)} URLs, max depth {result['max_depth']}")
+        for d in range(result['max_depth'] + 1):
+            print(f"  depth {d}: {result['urls_per_depth'].get(str(d), 0)} URLs (cumulative: {result['by_depth'].get(str(d), 0)})")
+
+        return result
+
     def crawl(self) -> CrawlResult:
         """Start crawling from configured URLs using BFS with concurrent workers"""
         print(f"Starting crawl with {len(self.config.urls)} URLs ({self.CONCURRENT_WORKERS} workers)")
@@ -786,18 +935,23 @@ class WebCrawler:
 def main():
     """CLI entry point"""
     if len(sys.argv) < 2:
-        print("Usage: python crawler.py <config_path>")
+        print("Usage: python crawler.py <config_path> [--pre-crawl]")
         sys.exit(1)
 
     config_path = sys.argv[1]
+    pre_crawl_mode = '--pre-crawl' in sys.argv
+
     config = CrawlerConfig.from_yaml(config_path)
-
     crawler = WebCrawler(config)
-    result = crawler.crawl()
 
-    # Output JSON result for Tauri
-    print("\n=== RESULT ===")
-    print(json.dumps(asdict(result), ensure_ascii=False))
+    if pre_crawl_mode:
+        result = crawler.pre_crawl()
+        print("\n=== RESULT ===")
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        result = crawler.crawl()
+        print("\n=== RESULT ===")
+        print(json.dumps(asdict(result), ensure_ascii=False))
 
 
 if __name__ == "__main__":

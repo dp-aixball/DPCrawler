@@ -5,6 +5,8 @@ var configPath = 'config.yaml';
 var isRunning = false;
 var crawledFiles = [];
 
+var preCrawlData = null; // stores pre-crawl result for progress estimation
+
 var el = {
   urls: document.getElementById('urls'),
   extensions: document.getElementById('extensions'),
@@ -15,6 +17,7 @@ var el = {
   recursive: document.getElementById('recursive'),
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
+  preCrawlBtn: document.getElementById('preCrawlBtn'),
   statusDot: document.getElementById('statusDot'),
   statusText: document.getElementById('statusText'),
   progressFill: document.getElementById('progressFill'),
@@ -253,6 +256,7 @@ function listen(event, callback) {
 function resetUI() {
   isRunning = false;
   el.startBtn.disabled = false;
+  el.preCrawlBtn.disabled = false;
   el.stopBtn.disabled = true;
   el.statusDot.className = 'status-dot';
   lockConfigInputs(false);
@@ -413,13 +417,84 @@ function onCrawlComplete(result) {
   resetUI();
 }
 
+// Pre-crawl: discover all URLs without downloading
+el.preCrawlBtn.addEventListener('click', function() {
+  if (isRunning) return;
+  isRunning = true;
+  el.preCrawlBtn.disabled = true;
+  el.startBtn.disabled = true;
+  el.stopBtn.disabled = false;
+  lockConfigInputs(true);
+  el.statusDot.className = 'status-dot active';
+  el.statusText.textContent = '预爬中...';
+  el.logContainer.innerHTML = '';
+  el.progressFill.style.width = '0%';
+  el.progressText.textContent = '正在发现URL...';
+  log('全站预爬开始...');
+
+  var unlistenPre = null;
+  var unlistenLog = null;
+  listen('pre-crawl-progress', function(event) {
+    var d = event.payload;
+    var docTag = d.is_doc ? ' [文档]' : '';
+    el.progressText.textContent = '已发现 ' + d.found + ' 个 URL，当前深度 ' + d.depth;
+  }).then(function(fn) { unlistenPre = fn; });
+  listen('crawl-progress', function(event) {
+    var data = event.payload;
+    if (data.line) log(data.line);
+  }).then(function(fn) { unlistenLog = fn; });
+
+  function cleanupListeners() {
+    if (unlistenPre) unlistenPre();
+    if (unlistenLog) unlistenLog();
+  }
+
+  var yaml = toYAML(getConfig());
+  invoke('write_config', { configPath: configPath, content: yaml }).then(function() {
+    return invoke('run_pre_crawl', { configPath: configPath });
+  }).then(function(jsonStr) {
+    preCrawlData = JSON.parse(jsonStr);
+    invoke('save_pre_crawl_result', { data: jsonStr });
+    log('预爬完成: 发现 ' + preCrawlData.total + ' 个 URL，最大深度 ' + preCrawlData.max_depth, 'success');
+    var depths = preCrawlData.urls_per_depth || {};
+    var by = preCrawlData.by_depth || {};
+    for (var d in depths) {
+      log('  深度 ' + d + ': ' + depths[d] + ' 个 URL (累计: ' + (by[d] || 0) + ')', 'info');
+    }
+    el.progressFill.style.width = '100%';
+    el.progressText.textContent = '预爬完成: ' + preCrawlData.total + ' 个 URL, 最大深度 ' + preCrawlData.max_depth;
+    el.statusText.textContent = '预爬完成';
+    cleanupListeners();
+    resetUI();
+  }, function(e) {
+    log('预爬失败: ' + e, 'error');
+    el.statusText.textContent = '预爬失败';
+    cleanupListeners();
+    resetUI();
+  });
+});
+
 // Start crawl
 el.startBtn.addEventListener('click', function() {
   if (isRunning) return;
   
   isRunning = true;
   crawledFiles = [];
+  var crawlStartTime = Date.now();
+  
+  // Estimate total based on configured max depth
+  var estimatedTotal = 0;
+  if (preCrawlData) {
+    var maxDepthSetting = parseInt(el.maxDepth.value, 10);
+    if (maxDepthSetting >= 999) {
+      estimatedTotal = preCrawlData.total;
+    } else {
+      var byDepth = preCrawlData.by_depth || {};
+      estimatedTotal = byDepth[String(maxDepthSetting - 1)] || preCrawlData.total;
+    }
+  }
   el.startBtn.disabled = true;
+  el.preCrawlBtn.disabled = true;
   el.stopBtn.disabled = false;
   lockConfigInputs(true);
   el.statusDot.className = 'status-dot active';
@@ -432,9 +507,13 @@ el.startBtn.addEventListener('click', function() {
   el.errorCount.textContent = '0';
   el.totalCount.textContent = '0';
   el.progressFill.style.width = '0%';
+  if (estimatedTotal > 0) {
+    el.progressText.textContent = '0 / ' + estimatedTotal;
+  }
   
   // Register event listener for real-time progress
   var unlisten = null;
+  var processedCount = 0;
   listen('crawl-progress', function(event) {
     var data = event.payload;
     var logType = 'info';
@@ -445,29 +524,46 @@ el.startBtn.addEventListener('click', function() {
     if (data.file_name && data.status !== 'info') {
       addFileToList(data.file_name, data.status, data.url || '');
     }
-    el.progressText.textContent = '\u5df2\u5904\u7406 ' + crawledFiles.length + ' \u4e2a\u6587\u4ef6';
+    // Count processed pages from Crawling: lines
     if (data.line.indexOf('Crawling:') !== -1) {
+      processedCount++;
       var crawlUrl = data.line.split('Crawling:')[1];
-      if (crawlUrl) el.statusText.textContent = '\u6b63\u5728\u722c\u53d6: ' + crawlUrl.trim();
+      if (crawlUrl) el.statusText.textContent = '正在爬取: ' + crawlUrl.trim();
+      // Progress with estimation
+      if (estimatedTotal > 0) {
+        var pct = Math.min(99, Math.round(processedCount / estimatedTotal * 100));
+        el.progressFill.style.width = pct + '%';
+        // Time estimation
+        var elapsed = (Date.now() - crawlStartTime) / 1000;
+        var rate = processedCount / elapsed; // pages per second
+        var remaining = rate > 0 ? Math.round((estimatedTotal - processedCount) / rate) : 0;
+        var etaStr = remaining > 60 ? Math.round(remaining / 60) + '分' + (remaining % 60) + '秒' : remaining + '秒';
+        el.progressText.textContent = processedCount + ' / ' + estimatedTotal + ' (预计剩余 ' + etaStr + ')';
+      } else {
+        el.progressText.textContent = '已处理 ' + processedCount + ' 个页面';
+      }
     }
   }).then(function(fn) { unlisten = fn; });
   
   // Start crawl flow - config is already auto-saved
-  log('\u5f00\u59cb\u722c\u53d6...');
+  log('开始爬取...');
+  if (estimatedTotal > 0) {
+    log('预爬数据: 预计 ' + estimatedTotal + ' 个 URL', 'info');
+  }
   var yaml = toYAML(getConfig());
   
   invoke('write_config', { configPath: configPath, content: yaml }).then(function() {
     var cfg = getConfig();
     for (var u = 0; u < cfg.crawler.urls.length; u++) {
-      log('\u76ee\u6807URL: ' + cfg.crawler.urls[u], 'info');
+      log('目标URL: ' + cfg.crawler.urls[u], 'info');
     }
     return invoke('run_crawler', { configPath: configPath });
   }).then(function(result) {
     onCrawlComplete(result);
     if (unlisten) unlisten();
   }, function(e) {
-    log('\u722c\u53d6\u5931\u8d25: ' + e, 'error');
-    el.statusText.textContent = '\u5931\u8d25';
+    log('爬取失败: ' + e, 'error');
+    el.statusText.textContent = '失败';
     resetUI();
     if (unlisten) unlisten();
   });
@@ -475,9 +571,14 @@ el.startBtn.addEventListener('click', function() {
 
 // Stop
 el.stopBtn.addEventListener('click', function() {
-  log('\u505c\u6b62\u722c\u53d6...');
+  log('正在停止...');
+  invoke('stop_crawler').then(function(msg) {
+    log('已停止: ' + msg, 'info');
+  }, function(e) {
+    log('停止失败: ' + e, 'error');
+  });
   resetUI();
-  el.statusText.textContent = '\u5df2\u505c\u6b62';
+  el.statusText.textContent = '已停止';
 });
 
 // Clear crawl results
@@ -600,6 +701,13 @@ if (window.__TAURI__ && window.__TAURI__.core) {
   loadSavedConfig();
   // Load last results after a short delay to let config populate outputDir first
   setTimeout(function() { loadLastResults(); }, 200);
+  // Load pre-crawl data from disk if available
+  invoke('load_pre_crawl_result').then(function(jsonStr) {
+    try {
+      preCrawlData = JSON.parse(jsonStr);
+      log('\u5df2\u52a0\u8f7d\u9884\u722c\u6570\u636e: ' + preCrawlData.total + ' \u4e2a URL', 'info');
+    } catch(e) {}
+  }, function() {});
 } else {
   log('Tauri API \u672a\u68c0\u6d4b\u5230', 'error');
 }
