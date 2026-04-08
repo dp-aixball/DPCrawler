@@ -10,6 +10,7 @@ build/
 .venv/
 venv/
 env/
+python/crawler-*.spec
 
 # ===== Node.js =====
 node_modules/
@@ -19,6 +20,7 @@ package-lock.json
 src-tauri/target/
 src-tauri/gen/
 src-tauri/.cargo/
+src-tauri/binaries/
 
 # ===== Output / Runtime =====
 output/

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrawlResult {
@@ -21,7 +21,15 @@ struct CrawlProgress {
     url: String,
 }
 
-fn project_root() -> PathBuf {
+/// Detect if running from a development project directory
+/// (has python/crawler.py), or installed system-wide.
+fn is_dev_mode() -> bool {
+    let dev_root = dev_project_root();
+    dev_root.join("python").join("crawler.py").exists()
+}
+
+/// Development project root (CWD-based, for `cargo tauri dev`)
+fn dev_project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_default();
     if cwd.ends_with("src-tauri") {
         cwd.parent().unwrap_or(&cwd).to_path_buf()
@@ -30,8 +38,67 @@ fn project_root() -> PathBuf {
     }
 }
 
+/// Data directory for config/output (works both dev and installed)
+/// Dev: project root; Installed: ~/.config/dpcrawler/
+fn data_dir() -> PathBuf {
+    if is_dev_mode() {
+        dev_project_root()
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let dir = PathBuf::from(home).join(".config").join("dpcrawler");
+        std::fs::create_dir_all(&dir).ok();
+        dir
+    }
+}
+
+/// Resolve a relative path against the data directory
 fn resolve_path(relative: &str) -> PathBuf {
-    project_root().join(relative)
+    data_dir().join(relative)
+}
+
+/// Find the crawler executable.
+/// Installed: next to our own binary (e.g. /usr/bin/crawler)
+/// Dev: use venv python or system python
+fn find_crawler() -> Result<(String, Vec<String>), String> {
+    // 1. Check next to our own executable (installed mode)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let sidecar = exe_dir.join("crawler");
+            if sidecar.exists() && sidecar.is_file() {
+                return Ok((sidecar.to_string_lossy().to_string(), vec![]));
+            }
+        }
+    }
+
+    // 2. Check src-tauri/binaries/ (dev mode with pre-built sidecar)
+    let root = dev_project_root();
+    if let Ok(entries) = root.join("src-tauri").join("binaries").read_dir() {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if let Some(name) = p.file_name() {
+                if name.to_string_lossy().starts_with("crawler-") && p.is_file() {
+                    let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    if size > 1000 {  // skip placeholder files
+                        return Ok((p.to_string_lossy().to_string(), vec![]));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Dev mode: venv python > system python
+    let crawler_file = root.join("python").join("crawler.py");
+    if crawler_file.exists() {
+        let venv_python = root.join(".venv").join("bin").join("python3");
+        let python_cmd = if venv_python.exists() {
+            venv_python.to_string_lossy().to_string()
+        } else {
+            "python3".to_string()
+        };
+        return Ok((python_cmd, vec![crawler_file.to_string_lossy().to_string()]));
+    }
+
+    Err("Crawler not found: no sidecar binary and no python/crawler.py".to_string())
 }
 
 #[tauri::command]
@@ -41,27 +108,23 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
     // Run crawler in a real OS thread so app.emit works immediately
     std::thread::spawn(move || {
         let result = (|| {
-            let root = project_root();
-            let abs_config = root.join(&config_path);
-            let crawler_file = root.join("python").join("crawler.py");
+            let abs_config = resolve_path(&config_path);
+            let work_dir = data_dir();
 
-            // Prefer venv Python, fallback to system python3
-            let venv_python = root.join(".venv").join("bin").join("python3");
-            let python_cmd = if venv_python.exists() {
-                venv_python.to_string_lossy().to_string()
-            } else {
-                "python3".to_string()
-            };
+            // Find crawler executable (sidecar or python)
+            let (cmd, extra_args) = find_crawler()?;
 
-            let mut child = Command::new(&python_cmd)
-                .current_dir(&root)
-                .arg(&crawler_file)
-                .arg(&abs_config)
+            let mut args: Vec<String> = extra_args;
+            args.push(abs_config.to_string_lossy().to_string());
+
+            let mut child = Command::new(&cmd)
+                .current_dir(&work_dir)
+                .args(&args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .env("PYTHONUNBUFFERED", "1")
                 .spawn()
-                .map_err(|e| format!("Failed to run crawler: {}", e))?;
+                .map_err(|e| format!("Failed to run crawler: {} (cmd: {})", e, cmd))?;
 
             let stdout = child.stdout.take().unwrap();
             let reader = BufReader::new(stdout);
@@ -142,8 +205,7 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
 
 #[tauri::command]
 fn update_delay(delay: f64) -> Result<(), String> {
-    // Write delay to a temp file that the Python crawler watches
-    let delay_file = project_root().join(".crawl_delay");
+    let delay_file = data_dir().join(".crawl_delay");
     std::fs::write(&delay_file, format!("{}", delay))
         .map_err(|e| format!("Failed to update delay: {}", e))
 }

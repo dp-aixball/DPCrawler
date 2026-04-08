@@ -684,7 +684,7 @@ class WebCrawler:
     def _get_delay(self) -> float:
         """Get current delay, checking for real-time updates from .crawl_delay file"""
         try:
-            delay_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.crawl_delay')
+            delay_file = os.path.join(os.getcwd(), '.crawl_delay')
             if os.path.exists(delay_file):
                 with open(delay_file, 'r') as f:
                     val = float(f.read().strip())
