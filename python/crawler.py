@@ -517,6 +517,8 @@ class WebCrawler:
 
     # URL extensions for binary files
     BINARY_EXTENSIONS = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'}
+    # Reverse mapping: extension -> converter function name
+    EXT_TO_CONVERTER = {ext: name for ct, (name, ext) in BINARY_CONVERTERS.items()}
     PLAINTEXT_EXTENSIONS = {'.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.md', '.rst', '.tex', '.log', '.rtf'}
 
     def extract_title(self, soup: BeautifulSoup) -> str:
@@ -696,25 +698,18 @@ class WebCrawler:
             if self.config.recursive and depth < self.config.max_depth:
                 sub_links = self.extract_links(soup, url)
 
-        elif content_type in self.BINARY_CONVERTERS or url_ext in self.BINARY_CONVERTERS or url_ext in self.BINARY_EXTENSIONS:
+        elif content_type in self.BINARY_CONVERTERS or url_ext in self.BINARY_EXTENSIONS:
             converter_name = None
             if content_type in self.BINARY_CONVERTERS:
                 converter_name, _ = self.BINARY_CONVERTERS[content_type]
-            else:
-                for ct, (cn, ext) in self.BINARY_CONVERTERS.items():
-                    if ext == url_ext:
-                        converter_name = cn
-                        break
+            elif url_ext in self.EXT_TO_CONVERTER:
+                converter_name = self.EXT_TO_CONVERTER[url_ext]
             if converter_name:
                 try:
-                    if url_ext == '.pdf':
-                        content = f"[PDF file: {os.path.basename(parsed.path)} - original binary saved]\n\n> 来源: {url}"
-                        title = os.path.basename(parsed.path) or filename
-                    else:
-                        converter = getattr(self, converter_name)
-                        with ThreadPoolExecutor(max_workers=1) as conv_exec:
-                            content = conv_exec.submit(converter, response.content).result(timeout=60)
-                        title = os.path.basename(parsed.path) or filename
+                    converter = getattr(self, converter_name)
+                    with ThreadPoolExecutor(max_workers=1) as conv_exec:
+                        content = conv_exec.submit(converter, response.content).result(timeout=60)
+                    title = os.path.basename(parsed.path) or filename
                 except Exception as e:
                     if isinstance(e, TimeoutError):
                         print(f"  -> Conversion timeout (60s) for {url_ext}: {url}")

@@ -106,17 +106,36 @@ document.querySelectorAll('.tab').forEach(function(tab) {
 
 var MAX_LOG_LINES = 1000;
 
+// Batched log rendering to prevent UI freeze from event flooding
+var _logQueue = [];
+var _logRafScheduled = false;
+
+function _flushLogQueue() {
+  _logRafScheduled = false;
+  if (_logQueue.length === 0) return;
+  var frag = document.createDocumentFragment();
+  for (var i = 0; i < _logQueue.length; i++) {
+    frag.appendChild(_logQueue[i]);
+  }
+  _logQueue = [];
+  el.logContainer.appendChild(frag);
+  // Trim excess lines
+  while (el.logContainer.childElementCount > MAX_LOG_LINES) {
+    el.logContainer.removeChild(el.logContainer.firstChild);
+  }
+  el.logContainer.scrollTop = el.logContainer.scrollHeight;
+}
+
 function log(msg, type) {
   type = type || 'info';
   var span = document.createElement('span');
   span.className = 'log-' + type;
   span.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
-  el.logContainer.appendChild(span);
-  while (el.logContainer.childElementCount > MAX_LOG_LINES) {
-    el.logContainer.removeChild(el.logContainer.firstChild);
+  _logQueue.push(span);
+  if (!_logRafScheduled) {
+    _logRafScheduled = true;
+    requestAnimationFrame(_flushLogQueue);
   }
-  // Always scroll to bottom during crawling
-  el.logContainer.scrollTop = el.logContainer.scrollHeight;
 }
 
 // File type icon using file-icon-vectors (classic style)
