@@ -455,12 +455,24 @@ fn stop_crawler() -> Result<String, String> {
         return Ok("No running process".to_string());
     }
     
-    // SIGTERM vs Taskkill
+    // Send SIGTERM first for graceful shutdown
     #[cfg(unix)]
     {
         unsafe {
             libc::kill(pid as i32, libc::SIGTERM);
         }
+        // Wait up to 5 seconds for graceful exit, then SIGKILL
+        let handle_pid = pid;
+        std::thread::spawn(move || {
+            for _ in 0..50 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if !is_pid_alive(handle_pid) {
+                    return;
+                }
+            }
+            // Force kill after 5 seconds
+            kill_pid(handle_pid);
+        });
     }
     #[cfg(windows)]
     {
@@ -473,8 +485,8 @@ fn stop_crawler() -> Result<String, String> {
             .spawn();
     }
     
-    CRAWLER_PID.store(0, Ordering::SeqCst);
-    Ok(format!("Stopped process {}", pid))
+    // Don't clear PID here - let the reader thread clear it when process actually exits
+    Ok(format!("Stopping process {}", pid))
 }
 
 #[tauri::command]

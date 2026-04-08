@@ -1004,6 +1004,11 @@ class WebCrawler:
         def _handle_stop(signum, frame):
             print("\n[crawl] Stop requested...")
             self._crawl_stopped = True
+            # Close session to abort in-flight requests immediately
+            try:
+                self.session.close()
+            except:
+                pass
 
         import signal
         signal.signal(signal.SIGTERM, _handle_stop)
