@@ -15,6 +15,7 @@ fn kill_pid(pid: u32) {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
             .arg("/F")
             .arg("/PID")
@@ -32,6 +33,7 @@ fn is_pid_alive(pid: u32) -> bool {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         // On Windows, checking if a PID is alive is best done via OpenProcess, 
         // but for simplicity we can check if tasklist sees it, 
         // or just try to kill it and ignore errors.
