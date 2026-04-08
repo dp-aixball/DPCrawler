@@ -450,6 +450,7 @@ fn stop_crawler() -> Result<String, String> {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
             .arg("/PID")
             .arg(pid.to_string())
