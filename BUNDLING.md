@@ -1,102 +1,98 @@
-# DPCrawler 跨平台打包指南
+# DPCrawler 从零开始：部署、开发与打包全指南
 
-本文档详细说明了如何在不同操作系统（Windows, macOS, Linux）上开发和打包 DPCrawler。
-
-## 1. 跨平台架构说明
-
-DPCrawler 是一个基于 **Tauri (Rust)** 和 **Python (Sidecar)** 的混合架构应用。为了实现跨平台无缝运行，我们构建了以下自动化机制：
-
-*   **统一构建入口**：通过 `scripts/build-sidecar.js` (Node.js) 自动识别操作系统，选择调用 `build-sidecar.sh` (Unix) 或 `build-sidecar.bat` (Windows)。
-*   **便携式 Python 环境**：应用会自动在本地 `.venv` 中寻找 Python 解释器并安装依赖，确保 Sidecar 编译的一致性。
-*   **平台适配层 (Rust)**：在 `src-tauri/src/lib.rs` 中使用了条件编译 (`#[cfg(unix/windows)]`)，处理了不同平台的进程管理（信号 vs 任务结束）和文件路径差异。
+本手册旨在指导任何开发者从拉取代码的第一步开始，在 Windows、macOS 或 Linux 上完美运行并打包 DPCrawler。
 
 ---
 
-## 2. 环境准备
+## 第 0 步：获取代码 (Git Clone)
 
-在所有平台上，您都需要准备以下基础环境：
-
-1.  **Node.js** (v18+)
-2.  **Rust & Cargo** (最新稳定版)
-3.  **Python 3.10+**
-4.  **初始化环境**：
-    ```bash
-    # 安装前端依赖
-    npm install
-    
-    # 创建并初始化虚拟环境 (Mac/Linux)
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r python/requirements.txt
-    
-    # Windows 用户使用:
-    # python -m venv .venv
-    # .venv\Scripts\activate
-    # pip install -r python/requirements.txt
-    ```
+首先，将项目克隆到您的本地机器：
+```bash
+git clone <项目仓库地址>
+cd DPCrawler
+```
 
 ---
 
-## 3. 打包流程
+## 第 1 步：安装全局系统环境 (System Setup)
 
-### macOS (Intel / Apple Silicon)
-1.  确保已安装 Xcode Command Line Tools。
-2.  运行打包命令：
-    ```bash
-    npm run build
-    ```
-3.  **输出结果**：`src-tauri/target/release/bundle/dmg/` 或 `app/`。
-4.  **注意**：Sidecar 会被命名为 `crawler-x86_64-apple-darwin` 或 `crawler-aarch64-apple-darwin`。
+在开始项目配置前，请确保您的操作系统具备以下基础：
 
-### Windows (x64)
-1.  确保已安装 [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) 和 [Visual Studio 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/)。
-2.  运行打包命令：
-    ```powershell
-    npm run build
-    ```
-3.  **输出结果**：`src-tauri\target\release\bundle\msi\`。
-4.  **注意**：Sidecar 会被命名为 `crawler-x86_64-pc-windows-msvc.exe`。
-
-### Linux (Ubuntu/Debian)
-1.  安装系统依赖：`sudo apt update && sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`。
-2.  运行打包命令：
-    ```bash
-    npm run build
-    ```
-3.  **输出结果**：`src-tauri/target/release/bundle/deb/` 或 `appimage/`。
-4.  **注意**：Sidecar 会被命名为 `crawler-x86_64-unknown-linux-gnu`。
+1.  **Node.js (v18+)**: [安装包下载](https://nodejs.org/)
+2.  **Rust**: [官方一键安装脚本](https://rustup.rs/) (安装后需重启终端)
+3.  **Python (3.10+)**: [安装包下载](https://www.python.org/) (Windows 安装时请勾选 "Add to PATH")
+4.  **平台工具链**:
+    *   **macOS**: 终端执行 `xcode-select --install`。
+    *   **Windows**: 安装 [Visual Studio 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (勾选 "C++ build tools")。
+    *   **Linux**: `sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`。
 
 ---
 
-## 4. 常见问题 (Troubleshooting)
+## 第 2 步：项目初始化 (Initialization)
 
-### 1. Sidecar 二进制文件丢失
-如果报错 `resource path binaries/crawler-... doesn't exist`：
-*   手动运行 `node scripts/build-sidecar.js` 强制重新编译。
-*   检查 `src-tauri/binaries/` 目录是否生成了对应平台后缀的文件。
+进入项目根目录后，依次执行以下命令：
 
-### 2. Python 依赖报错
-PyInstaller 在打包时可能无法找到某些隐式导入。
-*   检查 `python/crawler.spec` 中的 `hiddenimports`。
-*   确保在运行打包命令前已激活 `.venv` 并执行了 `pip install`。
+### 2.1 安装前端依赖
+```bash
+npm install
+```
 
-### 3. Windows 进程无法停止
-如果点击“停止”无效：
-*   确保您的终端具有管理员权限（有时处理僵尸进程需要）。
-*   检查 `src-tauri/src/lib.rs` 中的 `taskkill` 逻辑是否被杀毒软件拦截。
+### 2.2 创建 Python 虚拟环境 (关键)
+项目使用 Sidecar 模式，**必须**在根目录下存在名为 `.venv` 的虚拟环境。
+
+**macOS / Linux:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r python/requirements.txt
+```
+
+**Windows (PowerShell):**
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r python\requirements.txt
+```
 
 ---
 
-## 5. 跨平台支持状态总结
+## 第 3 步：进入开发模式 (Development)
 
-| 功能特性 | macOS | Windows | Linux | 状态 |
-| :--- | :---: | :---: | :---: | :--- |
-| **GUI 渲染** | ✅ | ✅ | ✅ | 已适配 |
-| **Sidecar 自动编译** | ✅ | ✅ | ✅ | 已适配 |
-| **进程管理 (停止功能)** | ✅ | ✅ | ✅ | 已适配 |
-| **多核并发爬取** | ✅ | ✅ | ✅ | 已适配 |
-| **附件转换 (PDF/Word)** | ✅ | ✅ | ✅ | 已适配 |
-| **配置自动保存** | ✅ | ✅ | ✅ | 已适配 |
+在正式打包前，建议先通过开发模式验证环境是否配置成功：
+```bash
+npm run dev
+```
+*   **结果**：如果能看到应用窗口弹出，且左上角状态显示“就绪”，说明环境、Sidecar 和前端通信全部正常。
 
-> [!IMPORTANT]
-> 由于 DPCrawler 涉及操作系统底层的进程调度，**请务必在目标平台上进行最终打包**。例如，要在 Windows 上分发软件，必须在 Windows 物理机或虚拟机中运行 `npm run build`。
+---
+
+## 第 4 步：打包成安装包 (Bundling)
+
+当需要分发软件时，执行打包命令：
+```bash
+npm run build
+```
+
+### 4.1 自动执行的任务
+执行该命令后，系统会自动完成以下工作：
+1.  自动调用 `scripts/build-sidecar.js`。
+2.  自动根据当前系统架构编译 Python 爬虫二进制文件。
+3.  自动将 Sidecar 嵌入到安装包中。
+4.  自动生成适合当前平台的安装包（`.dmg`, `.msi`, `.deb`）。
+
+### 4.2 安装包位置
+*   **macOS**: `src-tauri/target/release/bundle/dmg/DPCrawler.dmg`
+*   **Windows**: `src-tauri/target/release/bundle/msi/DPCrawler.msi`
+*   **Linux**: `src-tauri/target/release/bundle/deb/dpcrawler.deb`
+
+---
+
+## 5. 打包前必读 (Important Tips)
+
+*   **不要重命名二进制文件**：`src-tauri/binaries/` 下生成的文件包含复杂的“三元组”后缀（如 `-x86_64-apple-darwin`），这是 Tauri 识别侧边栏的唯一标识，请勿修改。
+*   **关于图标**：如果想更新图标，只需准备一张 1024x1024 的 PNG，放到根目录命名为 `app-icon.png`，然后运行 `npx tauri icon ./app-icon.png` 即可自动更新全平台图标。
+*   **环境变更**：如果您修改了 Python 代码，直接运行 `npm run build` 即可，系统会自动重新编译最新的侧边栏。
+
+---
+
+祝您打包愉快！如有任何环境报错，请检查第 1 步的系统工具链是否安装完整。
