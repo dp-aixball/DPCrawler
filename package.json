@@ -4,7 +4,8 @@
   "description": "RAG Knowledge Crawler",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "setup": "node scripts/setup.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"
