@@ -5,22 +5,64 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::{Emitter, Manager};
 
+/// Helper to kill a process by PID portably
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/F")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn();
+    }
+}
+
+/// Helper to check if a process is alive portably
+fn is_pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        // On Windows, checking if a PID is alive is best done via OpenProcess, 
+        // but for simplicity we can check if tasklist sees it, 
+        // or just try to kill it and ignore errors.
+        // For disable_webkit_cache, we'll try a simple command check.
+        let output = Command::new("tasklist")
+            .arg("/FI")
+            .arg(format!("PID eq {}", pid))
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output();
+        if let Ok(out) = output {
+            String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
+        } else {
+            false
+        }
+    }
+}
+
 /// Disable WebKit cache & persistence to prevent IPC corruption
 fn disable_webkit_cache() {
     // Kill stale process via PID file
     let pid_file = dirs::cache_dir()
         .map(|d| d.join("com.dpcrawler.app").join(".pid"))
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp/dpcrawler.pid"));
+        .unwrap_or_else(|| std::env::temp_dir().join("dpcrawler.pid"));
     
     if pid_file.exists() {
         if let Ok(mut f) = std::fs::File::open(&pid_file) {
             let mut buf = String::new();
             if f.read_to_string(&mut buf).is_ok() {
-                if let Ok(pid) = buf.trim().parse::<i32>() {
-                    // Check if process is still alive
-                    let alive = unsafe { libc::kill(pid, 0) == 0 };
-                    if alive {
-                        unsafe { libc::kill(pid, libc::SIGKILL); }
+                if let Ok(pid) = buf.trim().parse::<u32>() {
+                    if is_pid_alive(pid) {
+                        kill_pid(pid);
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
                 }
@@ -41,7 +83,9 @@ fn disable_webkit_cache() {
     }
     
     // Write our PID so next run can clean us up
-    let _ = std::fs::create_dir_all(pid_file.parent().unwrap());
+    if let Some(parent) = pid_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     if let Ok(mut f) = std::fs::File::create(&pid_file) {
         let _ = f.write_all(std::process::id().to_string().as_bytes());
     }
@@ -93,13 +137,19 @@ fn dev_project_root() -> PathBuf {
 }
 
 /// Data directory for config/output (works both dev and installed)
-/// Dev: project root; Installed: ~/.config/dpcrawler/
+/// Dev: project root; Installed: ~/.config/dpcrawler/ or %APPDATA%/dpcrawler/
 fn data_dir() -> PathBuf {
     if is_dev_mode() {
         dev_project_root()
     } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let dir = PathBuf::from(home).join(".config").join("dpcrawler");
+        let dir = dirs::data_dir()
+            .map(|d| d.join("dpcrawler"))
+            .unwrap_or_else(|| {
+                #[cfg(unix)]
+                { PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())).join(".config").join("dpcrawler") }
+                #[cfg(windows)]
+                { PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string())).join("dpcrawler") }
+            });
         std::fs::create_dir_all(&dir).ok();
         dir
     }
@@ -119,20 +169,25 @@ fn find_crawler() -> Result<(String, Vec<String>), String> {
         let root = dev_project_root();
         let crawler_file = root.join("python").join("crawler.py");
         if crawler_file.exists() {
-            let venv_python = root.join(".venv").join("bin").join("python3");
+            let venv_python = if cfg!(windows) {
+                root.join(".venv").join("Scripts").join("python.exe")
+            } else {
+                root.join(".venv").join("bin").join("python3")
+            };
             let python_cmd = if venv_python.exists() {
                 venv_python.to_string_lossy().to_string()
             } else {
-                "python3".to_string()
+                if cfg!(windows) { "python.exe".to_string() } else { "python3".to_string() }
             };
             return Ok((python_cmd, vec![crawler_file.to_string_lossy().to_string()]));
         }
     }
 
-    // Installed: check next to our own executable (e.g. /usr/bin/crawler)
+    // Installed: check next to our own executable (e.g. /usr/bin/crawler or C:\Program Files\...\crawler.exe)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            let sidecar = exe_dir.join("crawler");
+            let sidecar_name = if cfg!(windows) { "crawler.exe" } else { "crawler" };
+            let sidecar = exe_dir.join(sidecar_name);
             if sidecar.exists() && sidecar.is_file() {
                 return Ok((sidecar.to_string_lossy().to_string(), vec![]));
             }
@@ -145,7 +200,12 @@ fn find_crawler() -> Result<(String, Vec<String>), String> {
         for entry in entries.flatten() {
             let p = entry.path();
             if let Some(name) = p.file_name() {
-                if name.to_string_lossy().starts_with("crawler-") && p.is_file() {
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("crawler-") && p.is_file() {
+                    // On Windows, check for .exe
+                    if cfg!(windows) && !name_str.ends_with(".exe") {
+                        continue;
+                    }
                     let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                     if size > 1000 {  // skip placeholder files
                         return Ok((p.to_string_lossy().to_string(), vec![]));
@@ -174,13 +234,20 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
             let mut args: Vec<String> = extra_args;
             args.push(abs_config.to_string_lossy().to_string());
 
-            let mut child = Command::new(&cmd)
-                .current_dir(&work_dir)
+            let mut cmd_obj = Command::new(&cmd);
+            cmd_obj.current_dir(&work_dir)
                 .args(&args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .env("PYTHONUNBUFFERED", "1")
-                .spawn()
+                .env("PYTHONUNBUFFERED", "1");
+
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd_obj.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+
+            let mut child = cmd_obj.spawn()
                 .map_err(|e| format!("Failed to run crawler: {} (cmd: {})", e, cmd))?;
 
             CRAWLER_PID.store(child.id(), Ordering::SeqCst);
@@ -277,13 +344,20 @@ async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result<Str
             args.push(abs_config.to_string_lossy().to_string());
             args.push("--pre-crawl".to_string());
 
-            let mut child = Command::new(&cmd)
-                .current_dir(&work_dir)
+            let mut cmd_obj = Command::new(&cmd);
+            cmd_obj.current_dir(&work_dir)
                 .args(&args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .env("PYTHONUNBUFFERED", "1")
-                .spawn()
+                .env("PYTHONUNBUFFERED", "1");
+
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd_obj.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+
+            let mut child = cmd_obj.spawn()
                 .map_err(|e| format!("Failed to run pre-crawl: {} (cmd: {})", e, cmd))?;
 
             CRAWLER_PID.store(child.id(), Ordering::SeqCst);
@@ -364,9 +438,24 @@ fn stop_crawler() -> Result<String, String> {
     if pid == 0 {
         return Ok("No running process".to_string());
     }
-    unsafe {
-        libc::kill(pid as i32, libc::SIGTERM);
+    
+    // SIGTERM vs Taskkill
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
     }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T") // Tree kill
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn();
+    }
+    
     CRAWLER_PID.store(0, Ordering::SeqCst);
     Ok(format!("Stopped process {}", pid))
 }
@@ -554,7 +643,7 @@ pub fn run() {
                     // Kill any running crawler process
                     let pid = CRAWLER_PID.load(Ordering::SeqCst);
                     if pid > 0 {
-                        unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                        kill_pid(pid);
                         CRAWLER_PID.store(0, Ordering::SeqCst);
                     }
                 }

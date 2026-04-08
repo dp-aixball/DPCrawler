@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../src",
     "beforeDevCommand": "",
-    "beforeBuildCommand": "bash build-sidecar.sh"
+    "beforeBuildCommand": "node ../scripts/build-sidecar.js"
   },
   "app": {
     "withGlobalTauri": true,

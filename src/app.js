@@ -14,7 +14,6 @@ var el = {
   contentFormat: document.getElementById('contentFormat'),
   delay: document.getElementById('delay'),
   maxDepth: document.getElementById('maxDepth'),
-  recursive: document.getElementById('recursive'),
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   preCrawlBtn: document.getElementById('preCrawlBtn'),
@@ -209,7 +208,7 @@ function getConfig() {
       output_dir: el.outputDir.value,
       delay: parseFloat(el.delay.value) || 1,
       max_workers: 3,
-      recursive: el.recursive.checked,
+      recursive: true,
       max_depth: parseInt(el.maxDepth.value) || 3
     }
   };
@@ -342,7 +341,7 @@ function autoSaveConfig() {
 }
 
 // Bind auto-save to all config inputs (except delay which has special handling)
-var configInputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth, el.recursive];
+var configInputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth];
 for (var ci = 0; ci < configInputs.length; ci++) {
   configInputs[ci].addEventListener('input', autoSaveConfig);
   configInputs[ci].addEventListener('change', autoSaveConfig);
@@ -360,7 +359,7 @@ el.delay.addEventListener('change', function() {
 
 // Lock/unlock config inputs during crawl
 function lockConfigInputs(lock) {
-  var inputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth, el.recursive];
+  var inputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth];
   for (var i = 0; i < inputs.length; i++) {
     inputs[i].disabled = lock;
   }
@@ -659,8 +658,7 @@ function loadSavedConfig() {
       }
     }
     if (cfg.max_depth) el.maxDepth.value = cfg.max_depth;
-    if (cfg.recursive === 'true') el.recursive.checked = true;
-    else if (cfg.recursive === 'false') el.recursive.checked = false;
+    // recursive is now hardcoded to true
     if (exts && exts.length) {
       el.extensions.querySelectorAll('input').forEach(function(cb) {
         cb.checked = exts.indexOf(cb.value) !== -1;
