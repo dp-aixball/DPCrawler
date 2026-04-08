@@ -10,7 +10,7 @@ import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin, urlparse
-from typing import Set, Optional
+from typing import Set, Optional, Dict
 import re
 
 import requests
@@ -80,6 +80,8 @@ class WebCrawler:
         self.session.verify = False
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         self.ssl_fallback_hosts: Set[str] = set()  # Hosts that need HTTP fallback
+        self.host_semaphores: Dict[str, threading.Semaphore] = {}  # Per-host concurrency limit
+        self._host_lock = threading.Lock()
         self.visited_urls: Set[str] = set()
         self.new_files: list = []
         self.updated_files: list = []
@@ -568,83 +570,84 @@ class WebCrawler:
         if parsed.hostname in self.ssl_fallback_hosts and url.startswith('https://'):
             url = 'http://' + url[len('https://'):]
 
-        MAX_RETRIES = 3
+        # Per-host concurrency limit: max 2 concurrent requests per host
+        host_sem = None
+        if parsed.hostname:
+            with self._host_lock:
+                if parsed.hostname not in self.host_semaphores:
+                    self.host_semaphores[parsed.hostname] = threading.Semaphore(2)
+                host_sem = self.host_semaphores[parsed.hostname]
+
+        if host_sem:
+            host_sem.acquire()
+
         response = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = self.session.get(url, timeout=30)
-                # Fail fast on 404, don't retry
-                if response.status_code == 404:
+        try:
+            MAX_RETRIES = 3
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = self.session.get(url, timeout=60)
+                    if response.status_code == 404:
+                        response.raise_for_status()
                     response.raise_for_status()
-                    
-                response.raise_for_status()
-                break  # Success
-            except requests.RequestException as e:
-                # Check for SSL errors - try HTTP fallback
-                err_str = str(e)
-                if 'BAD_ECPOINT' in err_str or ('SSL' in err_str.upper() and 'SSLError' in err_str):
-                    if url.startswith('https://'):
-                        http_url = 'http://' + url[len('https://'):]
-                        print(f"  -> SSL error, trying HTTP fallback: {http_url}")
-                        try:
-                            response = self.session.get(http_url, timeout=30)
-                            # Accept response if it has meaningful content, even if 403
-                            if response.status_code < 400 or len(response.text) > 500:
-                                # Remember this host needs HTTP fallback
-                                host = urlparse(url).hostname
-                                if host:
-                                    self.ssl_fallback_hosts.add(host)
-                                    print(f"  -> Registered {host} for HTTP fallback")
-                                url = http_url
-                                break  # Success via HTTP
-                            response.raise_for_status()
-                        except requests.RequestException as http_e:
-                            # HTTP fallback also failed, try with User-Agent spoofing
+                    break
+                except requests.RequestException as e:
+                    err_str = str(e)
+                    if 'BAD_ECPOINT' in err_str or ('SSL' in err_str.upper() and 'SSLError' in err_str):
+                        if url.startswith('https://'):
+                            http_url = 'http://' + url[len('https://'):]
+                            print(f"  -> SSL error, trying HTTP fallback: {http_url}")
                             try:
-                                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-                                response = self.session.get(http_url, timeout=30, headers=headers)
-                                if len(response.text) > 500:  # Got meaningful content even if 403
+                                response = self.session.get(http_url, timeout=60)
+                                if response.status_code < 400 or len(response.text) > 500:
+                                    host = urlparse(url).hostname
+                                    if host:
+                                        self.ssl_fallback_hosts.add(host)
+                                        print(f"  -> Registered {host} for HTTP fallback")
                                     url = http_url
                                     break
-                            except:
-                                pass
+                                response.raise_for_status()
+                            except requests.RequestException as http_e:
+                                try:
+                                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                                    response = self.session.get(http_url, timeout=60, headers=headers)
+                                    if len(response.text) > 500:
+                                        url = http_url
+                                        break
+                                except:
+                                    pass
+                                with self._lock:
+                                    self.error_count += 1
+                                print(f"  -> SSL Error and HTTP fallback both failed: {e}")
+                                return False
+                        else:
                             with self._lock:
                                 self.error_count += 1
-                            print(f"  -> SSL Error and HTTP fallback both failed")
-                            print(f"  -> SSL: {e}")
-                            print(f"  -> HTTP: {http_e}")
+                            print(f"  -> SSL Error (unrecoverable): {e}")
                             return False
+                    if hasattr(e, 'response') and e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+                        with self._lock:
+                            self.error_count += 1
+                        print(f"  -> Error: {e}")
+                        return False
+                    if attempt < MAX_RETRIES - 1:
+                        wait_time = 2 * (attempt + 1)
+                        print(f"  -> Retry {attempt+1}/{MAX_RETRIES} for {url} (Wait {wait_time}s)...")
+                        time.sleep(wait_time)
                     else:
                         with self._lock:
                             self.error_count += 1
-                        print(f"  -> SSL Error (unrecoverable): {e}")
+                        print(f"  -> Error after {MAX_RETRIES} tries: {e}")
                         return False
-                # If it's a client error (e.g. 404), don't retry
-                if hasattr(e, 'response') and e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
-                    with self._lock:
-                        self.error_count += 1
-                    print(f"  -> Error: {e}")
-                    return False
-                    
-                if attempt < MAX_RETRIES - 1:
-                    wait_time = 2 * (attempt + 1)
-                    print(f"  -> Retry {attempt+1}/{MAX_RETRIES} for {url} (Wait {wait_time}s) due to error...")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    with self._lock:
-                        self.error_count += 1
-                    print(f"  -> Error after {MAX_RETRIES} tries: {e}")
-                    return False
-        # Fix encoding: use apparent_encoding if requests guessed wrong
+        finally:
+            if host_sem:
+                host_sem.release()
+
         if response.encoding and response.encoding.lower() == 'iso-8859-1':
             response.encoding = response.apparent_encoding
 
         content_type = response.headers.get("Content-Type", "text/html").split(";")[0].strip()
-        # Detect extension from URL for fallback
         url_ext = os.path.splitext(urlparse(url).path)[1].lower()
-
-        # Generate filename from URL
         parsed = urlparse(url)
         filename = re.sub(r"[^\w\-]", "_", parsed.path.strip("/").replace("/", "_") or "index")
 
@@ -653,46 +656,47 @@ class WebCrawler:
         raw_html = None
         sub_links = []
 
-        # --- 1. HTML ---
         if "text/html" in content_type and url_ext not in self.BINARY_EXTENSIONS:
             soup = BeautifulSoup(response.text, "html.parser")
             title = self.extract_title(soup)
             raw_html = response.text
             raw_content = self.html_to_markdown(response.text, url)
             content = self.extract_body_content(raw_content)
-            # Collect sub-links for BFS queue
             if self.config.recursive and depth < self.config.max_depth:
                 sub_links = self.extract_links(soup, url)
 
-        # --- 2. Binary document (PDF/DOCX/XLSX/PPTX) ---
-        elif content_type in self.BINARY_CONVERTERS or url_ext in self.BINARY_EXTENSIONS:
+        elif content_type in self.BINARY_CONVERTERS or url_ext in self.BINARY_CONVERTERS or url_ext in self.BINARY_EXTENSIONS:
             converter_name = None
             if content_type in self.BINARY_CONVERTERS:
                 converter_name, _ = self.BINARY_CONVERTERS[content_type]
             else:
-                # Fallback: match by URL extension
                 for ct, (cn, ext) in self.BINARY_CONVERTERS.items():
                     if ext == url_ext:
                         converter_name = cn
                         break
             if converter_name:
                 try:
-                    converter = getattr(self, converter_name)
-                    content = converter(response.content)
-                    # Use filename as title for binary docs
-                    title = os.path.basename(parsed.path) or filename
+                    if url_ext == '.pdf':
+                        content = f"[PDF file: {os.path.basename(parsed.path)} - original binary saved]\n\n> 来源: {url}"
+                        title = os.path.basename(parsed.path) or filename
+                    else:
+                        converter = getattr(self, converter_name)
+                        with ThreadPoolExecutor(max_workers=1) as conv_exec:
+                            content = conv_exec.submit(converter, response.content).result(timeout=60)
+                        title = os.path.basename(parsed.path) or filename
                 except Exception as e:
-                    print(f"  -> Conversion error ({url_ext}): {e}")
+                    if isinstance(e, TimeoutError):
+                        print(f"  -> Conversion timeout (60s) for {url_ext}: {url}")
+                    else:
+                        print(f"  -> Conversion error ({url_ext}): {e}")
                     return False
             else:
                 print(f"  -> Skipped (unsupported binary: {content_type})")
                 return False
 
-        # --- 3. Plain text types (txt/csv/json/xml/yaml/md/rst/tex/log) ---
         elif content_type in self.PLAINTEXT_TYPES or url_ext in self.PLAINTEXT_EXTENSIONS:
             text = response.text.strip()
             title = os.path.basename(parsed.path) or filename
-            # Wrap structured text in code blocks for readability
             if url_ext in {'.json', '.xml', '.yaml', '.yml', '.csv'}:
                 lang = url_ext.lstrip('.')
                 if lang == 'yml':
@@ -702,17 +706,14 @@ class WebCrawler:
                 content = text
 
         else:
-            # Unsupported content type, skip
             print(f"  -> Skipped (unsupported: {content_type})")
             return False
 
         if content is None:
             return False
 
-        # Prepend source URL
         content = f"> 来源: {url}\n\n{content}"
 
-        # Save content (thread-safe via lock)
         with self._lock:
             status = self.storage.save_content(
                 filename=filename,
@@ -736,7 +737,6 @@ class WebCrawler:
                 full_name = self.current_subdir + '/' + filename
                 print(f"  -> Unchanged: {full_name}")
 
-        # Add sub-links to BFS queue (only from HTML pages)
         if sub_links:
             with self._lock:
                 for link in sub_links:
@@ -746,8 +746,6 @@ class WebCrawler:
                         self.bfs_queue.append(link)
 
         return True
-
-        # Exception handled inside retry loop
 
     def _get_delay(self) -> float:
         """Get current delay, checking for real-time updates from .crawl_delay file"""
@@ -784,6 +782,8 @@ class WebCrawler:
         visited = set()
         lock = threading.Lock()
         self._pre_crawl_stopped = False  # graceful stop flag
+        host_semaphores = {}  # per-host concurrency limit
+        host_lock = threading.Lock()
 
         def _handle_stop(signum, frame):
             print("\n[pre-crawl] Stop requested, saving current stats...")
@@ -813,57 +813,72 @@ class WebCrawler:
                 print(f"  [pre-crawl] depth={depth} found={count} (doc) {url}")
                 return []
 
-            # Fetch HTML pages to extract links
-            response = None
-            try:
-                response = self.session.get(url, timeout=15)
-                response.raise_for_status()
-            except requests.RequestException as e:
-                # Check for SSL errors - try HTTP fallback
-                err_str = str(e)
-                if 'BAD_ECPOINT' in err_str or ('SSL' in err_str.upper() and 'SSLError' in err_str):
-                    if url.startswith('https://'):
-                        http_url = 'http://' + url[len('https://'):]
-                        try:
-                            response = self.session.get(http_url, timeout=15)
-                            # Accept response if it has meaningful content, even if 403
-                            if response.status_code < 400 or len(response.text) > 500:
-                                host = urlparse(url).hostname
-                                if host:
-                                    self.ssl_fallback_hosts.add(host)
-                                url = http_url
-                            else:
-                                response.raise_for_status()
-                        except Exception:
-                            return []
-                else:
+            # Per-host concurrency limit: max 2 concurrent requests per host
+            host = urlparse(url).hostname
+            sem = None
+            if host:
+                with host_lock:
+                    if host not in host_semaphores:
+                        host_semaphores[host] = threading.Semaphore(2)
+                    sem = host_semaphores[host]
+
+            def _fetch_and_extract():
+                # Fetch HTML pages to extract links
+                response = None
+                try:
+                    response = self.session.get(url, timeout=15)
+                    response.raise_for_status()
+                except requests.RequestException as e:
+                    err_str = str(e)
+                    if 'BAD_ECPOINT' in err_str or ('SSL' in err_str.upper() and 'SSLError' in err_str):
+                        if url.startswith('https://'):
+                            http_url = 'http://' + url[len('https://'):]
+                            try:
+                                response = self.session.get(http_url, timeout=15)
+                                if response.status_code < 400 or len(response.text) > 500:
+                                    host2 = urlparse(url).hostname
+                                    if host2:
+                                        self.ssl_fallback_hosts.add(host2)
+                                    url = http_url
+                                else:
+                                    response.raise_for_status()
+                            except Exception:
+                                return []
+                    else:
+                        return []
+
+                if response is None:
                     return []
 
-            content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
-            if "text/html" not in content_type:
-                # Non-HTML text file - count it but don't parse for links
+                content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
+                if "text/html" not in content_type:
+                    with lock:
+                        discovered[norm] = depth
+                    count = len(discovered)
+                    print(f"  [pre-crawl] depth={depth} found={count} {url}")
+                    return []
+
                 with lock:
                     discovered[norm] = depth
                 count = len(discovered)
                 print(f"  [pre-crawl] depth={depth} found={count} {url}")
-                return []
 
-            # HTML page: count it and extract links
-            with lock:
-                discovered[norm] = depth
-            count = len(discovered)
-            print(f"  [pre-crawl] depth={depth} found={count} {url}")
+                if response.encoding and response.encoding.lower() == 'iso-8859-1':
+                    response.encoding = response.apparent_encoding
+                soup = BeautifulSoup(response.text, "html.parser")
+                child_links = []
+                for link in self.extract_links(soup, url):
+                    link_norm = self._normalize_url(link)
+                    with lock:
+                        if link_norm not in visited and link_norm not in discovered:
+                            child_links.append((link, depth + 1))
+                return child_links
 
-            if response.encoding and response.encoding.lower() == 'iso-8859-1':
-                response.encoding = response.apparent_encoding
-            soup = BeautifulSoup(response.text, "html.parser")
-            child_links = []
-            for link in self.extract_links(soup, url):
-                link_norm = self._normalize_url(link)
-                with lock:
-                    if link_norm not in visited and link_norm not in discovered:
-                        child_links.append((link, depth + 1))
-            return child_links
+            if sem:
+                with sem:
+                    return _fetch_and_extract()
+            else:
+                return _fetch_and_extract()
 
         def _build_result() -> dict:
             """Build statistics from current discovered state."""
@@ -910,12 +925,19 @@ class WebCrawler:
                                 break
                             continue
 
-                        # Wait for one completion
+                        # Wait for at least one to complete (with timeout to allow periodic checks)
                         done = set()
-                        for f in as_completed(active):
-                            done.add(f)
-                            break
+                        try:
+                            for f in as_completed(active, timeout=2):
+                                done.add(f)
+                        except TimeoutError:
+                            pass  # No futures completed in 2s, check stop flag and retry
                         active -= done
+
+                        # Periodically check if stopped
+                        if self._pre_crawl_stopped:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
 
                         for f in done:
                             try:
@@ -924,8 +946,6 @@ class WebCrawler:
                                     queue.append((link, d))
                             except Exception:
                                 pass
-
-                        time.sleep(0.05)  # light throttle
 
         except Exception as e:
             print(f"Pre-crawl error: {e}")

@@ -103,13 +103,22 @@ document.querySelectorAll('.tab').forEach(function(tab) {
   }
 })();
 
+var MAX_LOG_LINES = 1000;
+
 function log(msg, type) {
   type = type || 'info';
   var span = document.createElement('span');
   span.className = 'log-' + type;
   span.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
   el.logContainer.appendChild(span);
-  el.logContainer.scrollTop = el.logContainer.scrollHeight;
+  // Limit log size: remove oldest when exceeding MAX_LOG_LINES
+  while (el.logContainer.childElementCount > MAX_LOG_LINES) {
+    el.logContainer.removeChild(el.logContainer.firstChild);
+  }
+  // Only scroll to bottom if already near bottom (avoid scroll jump during manual scroll)
+  if (el.logContainer.scrollHeight - el.logContainer.scrollTop - el.logContainer.clientHeight < 50) {
+    el.logContainer.scrollTop = el.logContainer.scrollHeight;
+  }
 }
 
 // File type icon using file-icon-vectors (classic style)
@@ -133,7 +142,39 @@ function fileTypeIconHtml(ext) {
 function addFileToList(name, status, url) {
   if (!name) return;
   crawledFiles.push({ name: name, status: status, url: url || '' });
-  renderFileList();
+  // Cap file list to avoid DOM bloat
+  if (crawledFiles.length <= 2000) {
+    appendFileItem(crawledFiles[crawledFiles.length - 1], crawledFiles.length - 1);
+  }
+}
+
+function appendFileItem(f, index) {
+  var badgeClass = f.status === 'new' ? 'new' : (f.status === 'updated' ? 'updated' : (f.status === 'unchanged' ? 'unchanged' : ''));
+  var badgeText = f.status === 'new' ? '\u65b0\u589e' : (f.status === 'updated' ? '\u66f4\u65b0' : '\u672a\u53d8');
+  var div = document.createElement('div');
+  div.className = 'file-item';
+  div.setAttribute('tabindex', '0');
+  div.dataset.index = String(index);
+  var displayName = f.name;
+  var subdir = '';
+  var slashIdx = f.name.indexOf('/');
+  if (slashIdx !== -1) {
+    subdir = f.name.substring(0, slashIdx);
+    displayName = f.name.substring(slashIdx + 1);
+  }
+  var fileExt = getFileTypeFromUrl(f.url);
+  div.innerHTML = '<span class="file-badge ' + badgeClass + '">' + badgeText + '</span>' +
+    fileTypeIconHtml(fileExt) +
+    (subdir ? '<span class="file-subdir">' + subdir + '</span>' : '') +
+    '<span class="file-name">' + displayName + '</span>';
+  (function(name, url, element) {
+    element.addEventListener('click', function() { selectFileItem(element, name, url); });
+    if (url) {
+      element.title = url;
+      element.addEventListener('dblclick', function() { invoke('open_url', { url: url }); });
+    }
+  })(f.name, f.url, div);
+  el.fileList.appendChild(div);
 }
 
 function renderFileList() {
