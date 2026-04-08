@@ -7,10 +7,40 @@ var crawledFiles = [];
 
 var preCrawlData = null; // stores pre-crawl result for progress estimation
 
+// Block reload (Ctrl+R, F5, Cmd+R) and close (Ctrl+Q) during crawl
+document.addEventListener('keydown', function(e) {
+  if (!isRunning) return;
+  if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key === 'r')) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'q') {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+});
+window.addEventListener('beforeunload', function(e) {
+  if (isRunning) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// Listen for close confirmation during crawl (triggered by Rust)
+if (window.__TAURI__ && window.__TAURI__.event) {
+  window.__TAURI__.event.listen('confirm-exit', function() {
+    if (confirm('\u722c\u53d6\u6b63\u5728\u8fdb\u884c\u4e2d\uff0c\u786e\u5b9a\u8981\u9000\u51fa\u5417\uff1f')) {
+      window.__TAURI__.core.invoke('force_quit');
+    }
+  });
+}
+
 var el = {
   urls: document.getElementById('urls'),
   extensions: document.getElementById('extensions'),
   outputDir: document.getElementById('outputDir'),
+  browseDirBtn: document.getElementById('browseDirBtn'),
+  openDirBtn: null,
   contentFormat: document.getElementById('contentFormat'),
   delay: document.getElementById('delay'),
   maxDepth: document.getElementById('maxDepth'),
@@ -30,8 +60,11 @@ var el = {
   totalCount: document.getElementById('totalCount'),
   previewTitle: document.getElementById('previewTitle'),
   previewContent: document.getElementById('previewContent'),
-  previewOpenBtn: document.getElementById('previewOpenBtn')
+  previewOpenBtn: document.getElementById('previewOpenBtn'),
+  siteList: document.getElementById('siteList')
 };
+
+var activeSite = null; // currently selected site in sidebar
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(function(tab) {
@@ -110,7 +143,7 @@ function renderFileList() {
     return (order[a.status] || 9) - (order[b.status] || 9);
   });
 
-  el.fileList.innerHTML = '';
+  var fragment = document.createDocumentFragment();
   for (var i = 0; i < sorted.length; i++) {
     var f = sorted[i];
     var badgeClass = f.status === 'new' ? 'new' : (f.status === 'updated' ? 'updated' : (f.status === 'unchanged' ? 'unchanged' : ''));
@@ -142,8 +175,10 @@ function renderFileList() {
         });
       }
     })(f.name, f.url, div);
-    el.fileList.appendChild(div);
+    fragment.appendChild(div);
   }
+  el.fileList.innerHTML = '';
+  el.fileList.appendChild(fragment);
 
   // Keyboard navigation on file list
   el.fileList.onkeydown = function(e) {
@@ -194,7 +229,8 @@ function selectFileItem(element, name, url) {
 }
 
 function getConfig() {
-  var urls = el.urls.value.split('\n').map(function(u) { return u.trim(); }).filter(function(u) { return u; });
+  var url = el.urls.value.trim();
+  var urls = url ? [url] : [];
   var exts = [];
   el.extensions.querySelectorAll('input:checked').forEach(function(cb) { exts.push(cb.value); });
   return {
@@ -357,13 +393,18 @@ el.delay.addEventListener('change', function() {
   }
 });
 
-// Lock/unlock config inputs during crawl
+// Lock/unlock all UI during crawl (only stop button remains active)
 function lockConfigInputs(lock) {
   var inputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth];
   for (var i = 0; i < inputs.length; i++) {
     inputs[i].disabled = lock;
   }
   el.extensions.querySelectorAll('input').forEach(function(cb) { cb.disabled = lock; });
+  // Lock action buttons
+  var clearBtn = document.getElementById('clearBtn');
+  if (clearBtn) clearBtn.disabled = lock;
+  if (el.browseDirBtn) el.browseDirBtn.disabled = lock;
+  if (el.openDirBtn) el.openDirBtn.disabled = lock;
   // delay is always editable
 }
 
@@ -382,8 +423,11 @@ function onCrawlComplete(result) {
   if (uncMatch) el.unchangedCount.textContent = uncMatch[1];
   if (errMatch) el.errorCount.textContent = errMatch[1];
   
-  // Load file list from index.json
+  // Load file list from index.json, filtered by crawled site
   var outputDir = el.outputDir.value || './output';
+  var crawlSite = getActiveSiteFromUrl();
+  // Refresh site list and auto-select
+  loadSiteList(crawlSite);
   invoke('read_index', { outputDir: outputDir }).then(function(indexStr) {
     try {
       var indexData = JSON.parse(indexStr);
@@ -397,6 +441,8 @@ function onCrawlComplete(result) {
       var names = Object.keys(fileTree);
       for (var i = 0; i < names.length; i++) {
         var name = names[i];
+        // Filter by crawled site if known
+        if (crawlSite && name.indexOf(crawlSite + '/') !== 0) continue;
         var meta = fileTree[name];
         var st = newSet[name] ? 'new' : (updSet[name] ? 'updated' : 'unchanged');
         addFileToList(name, st, meta.source_url || '');
@@ -414,6 +460,123 @@ function onCrawlComplete(result) {
   el.progressText.textContent = '\u5b8c\u6210 - \u603b\u8ba1 ' + t + ', \u65b0\u589e ' + n + ', \u66f4\u65b0 ' + u + ', \u672a\u53d8 ' + uc;
   el.statusText.textContent = '\u5b8c\u6210';
   resetUI();
+}
+
+// --- Site list management ---
+function loadSiteList(autoSelectSite) {
+  var outputDir = el.outputDir.value || './output';
+  invoke('list_crawled_sites', { outputDir: outputDir }).then(function(jsonStr) {
+    try {
+      var sites = JSON.parse(jsonStr);
+      el.siteList.innerHTML = '';
+      if (sites.length === 0) {
+        el.siteList.innerHTML = '<div class="site-item empty">暂无站点</div>';
+        return;
+      }
+      for (var i = 0; i < sites.length; i++) {
+        (function(site) {
+          var div = document.createElement('div');
+          div.className = 'site-item';
+          div.innerHTML = '<span class="site-name">' + site.name + '</span>' +
+            '<span class="site-count">' + site.file_count + '</span>' +
+            '<span class="site-open" title="打开目录">📂</span>';
+          div.querySelector('.site-open').addEventListener('click', function(e) {
+            e.stopPropagation();
+            var base = el.outputDir.value || './output';
+            invoke('open_url', { url: base + '/' + site.name });
+          });
+          div.addEventListener('click', function() {
+            if (isRunning) return;
+            selectSite(site.name, div);
+          });
+          el.siteList.appendChild(div);
+          if (autoSelectSite && site.name === autoSelectSite) {
+            selectSite(site.name, div);
+          }
+        })(sites[i]);
+      }
+    } catch(e) {}
+  }, function() {});
+}
+
+function selectSite(siteName, element) {
+  activeSite = siteName;
+  var items = el.siteList.querySelectorAll('.site-item');
+  for (var i = 0; i < items.length; i++) items[i].classList.remove('active');
+  if (element) element.classList.add('active');
+  loadSiteFiles(siteName);
+  // Load and fill site config into the settings panel
+  if (!isRunning) {
+    var outputDir = el.outputDir.value || './output';
+    invoke('read_site_config', { outputDir: outputDir, siteName: siteName }).then(function(jsonStr) {
+      try {
+        var cfg = JSON.parse(jsonStr);
+        if (!cfg.url) return;
+        // Fill target URL
+        el.urls.value = cfg.url;
+        // Fill max depth
+        if (cfg.max_depth !== undefined) el.maxDepth.value = cfg.max_depth;
+        // Fill delay
+        if (cfg.delay !== undefined) el.delay.value = cfg.delay;
+        // Fill content format
+        if (cfg.content_format) el.contentFormat.value = cfg.content_format;
+        // Fill file extensions checkboxes
+        if (cfg.file_extensions && cfg.file_extensions.length > 0) {
+          var checkboxes = el.extensions.querySelectorAll('input[type="checkbox"]');
+          for (var i = 0; i < checkboxes.length; i++) {
+            checkboxes[i].checked = cfg.file_extensions.indexOf(checkboxes[i].value) >= 0;
+          }
+        }
+        log('已加载站点配置: ' + siteName, 'info');
+      } catch(e) {}
+    }, function() {});
+  }
+}
+
+function loadSiteFiles(siteName) {
+  var outputDir = el.outputDir.value || './output';
+  invoke('read_site_index', { outputDir: outputDir, siteName: siteName }).then(function(indexStr) {
+    try {
+      var indexData = JSON.parse(indexStr);
+      var fileTree = indexData.file_tree || {};
+      crawledFiles = [];
+      var names = Object.keys(fileTree);
+      for (var i = 0; i < names.length; i++) {
+        var name = names[i];
+        var meta = fileTree[name];
+        crawledFiles.push({ name: name, status: 'unchanged', url: meta.source_url || '' });
+      }
+      renderFileList();
+      el.totalCount.textContent = names.length;
+      el.unchangedCount.textContent = names.length;
+      el.newCount.textContent = '0';
+      el.updatedCount.textContent = '0';
+      el.errorCount.textContent = '0';
+      el.progressFill.style.width = names.length > 0 ? '100%' : '0%';
+      el.progressText.textContent = siteName + ': ' + names.length + ' 个文件';
+    } catch(e) {}
+  }, function() {});
+}
+
+function getActiveSiteFromUrl() {
+  var url = el.urls.value.trim();
+  if (!url) return null;
+  try {
+    var a = document.createElement('a');
+    a.href = url;
+    return a.hostname || null;
+  } catch(e) { return null; }
+}
+
+// Browse directory button
+if (el.browseDirBtn) {
+  el.browseDirBtn.addEventListener('click', function() {
+    if (typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.dialog) {
+      window.__TAURI__.dialog.open({ directory: true, title: '选择输出目录' }).then(function(path) {
+        if (path) el.outputDir.value = path;
+      }).catch(function(err) { alert('Error: ' + err); });
+    }
+  });
 }
 
 // Pre-crawl: discover all URLs without downloading
@@ -586,18 +749,23 @@ document.getElementById('clearBtn').addEventListener('click', function() {
     log('\u722c\u53d6\u8fdb\u884c\u4e2d\uff0c\u65e0\u6cd5\u6e05\u7a7a', 'error');
     return;
   }
-  // Extract domain subdirs from configured URLs
-  var urls = el.urls.value.split('\n').filter(function(u) { return u.trim(); });
+  // Determine which site(s) to clear
   var subdirs = [];
-  for (var i = 0; i < urls.length; i++) {
-    try {
-      var a = document.createElement('a');
-      a.href = urls[i].trim();
-      if (a.hostname) subdirs.push(a.hostname);
-    } catch(e) {}
+  if (activeSite) {
+    subdirs.push(activeSite);
+  } else {
+    var url = el.urls.value.trim();
+    if (url) {
+      try {
+        if (url.indexOf('://') === -1) url = 'https://' + url;
+        var a = document.createElement('a');
+        a.href = url;
+        if (a.hostname) subdirs.push(a.hostname);
+      } catch(e) {}
+    }
   }
   if (subdirs.length === 0) {
-    log('\u6ca1\u6709\u914d\u7f6e\u76ee\u6807URL', 'error');
+    log('\u6ca1\u6709\u9009\u4e2d\u7ad9\u70b9\u6216\u914d\u7f6e\u76ee\u6807URL', 'error');
     return;
   }
   var outputDir = el.outputDir.value || './output';
@@ -617,6 +785,9 @@ document.getElementById('clearBtn').addEventListener('click', function() {
     el.previewContent.textContent = '\u5355\u51fb\u5de6\u4fa7\u6587\u4ef6\u5373\u53ef\u9884\u89c8\u5185\u5bb9';
     el.previewTitle.textContent = '\u9009\u62e9\u6587\u4ef6\u9884\u89c8';
     el.previewOpenBtn.style.display = 'none';
+    // Refresh site list to remove cleared sites
+    activeSite = null;
+    loadSiteList();
   }, function(e) {
     log('\u6e05\u7a7a\u5931\u8d25: ' + e, 'error');
   });
@@ -679,12 +850,12 @@ function loadLastResults() {
       var names = Object.keys(fileTree);
       if (names.length === 0) return;
       crawledFiles = [];
-      el.fileList.innerHTML = '';
       for (var i = 0; i < names.length; i++) {
         var name = names[i];
         var meta = fileTree[name];
-        addFileToList(name, 'unchanged', meta.source_url || '');
+        crawledFiles.push({ name: name, status: 'unchanged', url: meta.source_url || '' });
       }
+      renderFileList();
       el.totalCount.textContent = names.length;
       el.unchangedCount.textContent = names.length;
       el.progressFill.style.width = '100%';
@@ -697,8 +868,10 @@ function loadLastResults() {
 if (window.__TAURI__ && window.__TAURI__.core) {
   log('DPCrawler \u5df2\u5c31\u7eea', 'success');
   loadSavedConfig();
-  // Load last results after a short delay to let config populate outputDir first
-  setTimeout(function() { loadLastResults(); }, 200);
+  setTimeout(function() {
+    loadSiteList();
+    loadLastResults();
+  }, 200);
   // Load pre-crawl data from disk if available
   invoke('load_pre_crawl_result', { configPath: configPath }).then(function(jsonStr) {
     try {
@@ -709,5 +882,21 @@ if (window.__TAURI__ && window.__TAURI__.core) {
 } else {
   log('Tauri API \u672a\u68c0\u6d4b\u5230', 'error');
 }
+
+// About dialog
+document.getElementById('aboutBtn').addEventListener('click', function() {
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:32px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.15);max-width:360px">' +
+    '<img src="favicon.png" style="width:64px;height:64px;margin-bottom:12px">' +
+    '<h2 style="margin:0 0 4px;font-size:20px;color:#1e293b">DPCrawler</h2>' +
+    '<p style="margin:0 0 8px;font-size:13px;color:#64748b">RAG\u77e5\u8bc6\u722c\u866b</p>' +
+    '<p style="margin:0 0 4px;font-size:12px;color:#94a3b8">v1.0.0</p>' +
+    '<p style="margin:0 0 16px;font-size:12px;color:#94a3b8">\u00a9 2026 DEEPAI GROUP</p>' +
+    '<button style="padding:6px 24px;border:none;background:#3b82f6;color:#fff;border-radius:6px;cursor:pointer;font-size:13px" onclick="this.closest(\'div[style]\').parentElement.remove()">\u786e\u5b9a</button>' +
+    '</div>';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+});
 
 }); // end DOMContentLoaded

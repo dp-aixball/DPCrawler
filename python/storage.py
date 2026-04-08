@@ -88,12 +88,14 @@ class StorageManager:
     def save_content(self, filename: str, content: str, source_url: str, title: str = "", content_type: str = "text/html", raw_html: str = "") -> Optional[str]:
         """Save content and its metadata, returns file status: 'new', 'updated', 'unchanged', or None on error"""
         try:
-            os.makedirs(self.output_dir, exist_ok=True)
+            docs_dir = os.path.join(self.output_dir, "docs")
+            meta_dir = os.path.join(self.output_dir, "meta")
+            os.makedirs(docs_dir, exist_ok=True)
 
             # Compute file path and extension
             ext = self._get_extension(content_type, filename)
             base_filename = self._sanitize_filename(filename)
-            content_path = os.path.join(self.output_dir, f"{base_filename}{ext}")
+            content_path = os.path.join(docs_dir, f"{base_filename}{ext}")
 
             # Compute MD5 from raw HTML (original content) for accurate change detection
             md5_source = raw_html if raw_html else content
@@ -111,6 +113,7 @@ class StorageManager:
 
             # Save metadata file
             if self.enable_meta:
+                os.makedirs(meta_dir, exist_ok=True)
                 meta = FileMeta(
                     md5=new_md5,
                     fetch_date=datetime.now().isoformat(),
@@ -119,7 +122,7 @@ class StorageManager:
                     file_size=file_size,
                     content_type=content_type,
                 )
-                meta_path = os.path.join(self.output_dir, f"{base_filename}.json")
+                meta_path = os.path.join(meta_dir, f"{base_filename}.json")
                 with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(asdict(meta), f, ensure_ascii=False, indent=2)
 

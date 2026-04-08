@@ -536,7 +536,13 @@ fn clear_output(output_dir: String, subdirs: Vec<String>) -> Result<String, Stri
 
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    open::that(&url).map_err(|e| format!("Failed to open URL: {}", e))
+    let path = resolve_path(url.strip_prefix("./").unwrap_or(&url));
+    let abs_str = path.to_string_lossy().to_string();
+    Command::new("xdg-open")
+        .arg(&abs_str)
+        .spawn()
+        .map_err(|e| format!("Failed to open {}: {}", abs_str, e))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -554,15 +560,112 @@ fn write_config(config_path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 fn read_file_content(output_dir: String, filename: String) -> Result<String, String> {
     let base = resolve_path(&output_dir);
-    // filename may contain subdir like "www.example.com/page_name"
+    // filename format: "site_name/page_name", content is in "site_name/docs/page_name.ext"
+    let parts: Vec<&str> = filename.splitn(2, '/').collect();
+    let (site_dir, file_base) = if parts.len() == 2 {
+        (parts[0], parts[1])
+    } else {
+        ("", filename.as_str())
+    };
+    
     for ext in &[".md", ".html", ".htm", ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".xml", ".json", ".rtf", ".odt", ".epub", ".rst", ".yaml", ".yml", ".log", ".tex"] {
-        let path = base.join(format!("{}{}", filename, ext));
-        if path.exists() {
-            return std::fs::read_to_string(&path)
+        // New structure: site_name/docs/file.ext
+        let docs_path = if site_dir.is_empty() {
+            base.join("docs").join(format!("{}{}", file_base, ext))
+        } else {
+            base.join(site_dir).join("docs").join(format!("{}{}", file_base, ext))
+        };
+        if docs_path.exists() {
+            return std::fs::read_to_string(&docs_path)
+                .map_err(|e| format!("Failed to read file: {}", e));
+        }
+        // Legacy flat structure: site_name/file.ext
+        let legacy_path = base.join(format!("{}{}", filename, ext));
+        if legacy_path.exists() {
+            return std::fs::read_to_string(&legacy_path)
                 .map_err(|e| format!("Failed to read file: {}", e));
         }
     }
     Err(format!("File not found: {}", filename))
+}
+
+#[tauri::command]
+fn list_crawled_sites(output_dir: String) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let mut sites: Vec<serde_json::Value> = Vec::new();
+    if base.exists() {
+        if let Ok(entries) = std::fs::read_dir(&base) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let index_path = path.join("index.json");
+                    let mut file_count = 0u32;
+                    let mut last_updated = String::new();
+                    if index_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&index_path) {
+                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
+                                if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                                    file_count = tree.len() as u32;
+                                }
+                                if let Some(ts) = data.get("last_updated").and_then(|v| v.as_str()) {
+                                    last_updated = ts.to_string();
+                                }
+                            }
+                        }
+                    }
+                    sites.push(serde_json::json!({
+                        "name": name,
+                        "file_count": file_count,
+                        "last_updated": last_updated
+                    }));
+                }
+            }
+        }
+    }
+    // Sort by name
+    sites.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+    Ok(serde_json::to_string(&sites).unwrap_or_else(|_| "[]".to_string()))
+}
+
+#[tauri::command]
+fn read_site_config(output_dir: String, site_name: String) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let config_path = base.join(&site_name).join("crawl_config.json");
+    if config_path.exists() {
+        std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read site config: {}", e))
+    } else {
+        Ok("{}".to_string())
+    }
+}
+
+#[tauri::command]
+fn read_site_index(output_dir: String, site_name: String) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let index_path = base.join(&site_name).join("index.json");
+    if index_path.exists() {
+        let content = std::fs::read_to_string(&index_path)
+            .map_err(|e| format!("Failed to read site index: {}", e))?;
+        // Re-key file_tree entries with site_name prefix
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
+            let mut prefixed_tree = serde_json::Map::new();
+            if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                for (name, meta) in tree {
+                    let full_name = format!("{}/{}", site_name, name);
+                    prefixed_tree.insert(full_name, meta.clone());
+                }
+            }
+            let result = serde_json::json!({
+                "file_tree": prefixed_tree,
+                "total_files": prefixed_tree.len()
+            });
+            return Ok(result.to_string());
+        }
+        Ok(content)
+    } else {
+        Ok("{\"file_tree\":{},\"total_files\":0}".to_string())
+    }
 }
 
 #[tauri::command]
@@ -619,11 +722,22 @@ fn read_index(output_dir: String) -> Result<String, String> {
     Ok(result.to_string())
 }
 
+#[tauri::command]
+fn force_quit(app: tauri::AppHandle) {
+    let pid = CRAWLER_PID.load(Ordering::SeqCst);
+    if pid > 0 {
+        kill_pid(pid);
+        CRAWLER_PID.store(0, Ordering::SeqCst);
+    }
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     disable_webkit_cache();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             run_crawler,
             run_pre_crawl,
@@ -636,24 +750,39 @@ pub fn run() {
             open_url,
             read_file_content,
             update_delay,
-            clear_output
+            clear_output,
+            list_crawled_sites,
+            read_site_config,
+            read_site_index,
+            force_quit
         ])
         .setup(|app| {
-            // Ensure app exits cleanly when main window closes
             let window = app.get_webview_window("main").unwrap();
+            let window_clone = window.clone();
             window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api: _, .. } = event {
-                    // Kill any running crawler process
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     let pid = CRAWLER_PID.load(Ordering::SeqCst);
                     if pid > 0 {
-                        kill_pid(pid);
-                        CRAWLER_PID.store(0, Ordering::SeqCst);
+                        api.prevent_close();
                     }
                 }
             });
-
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            match event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    let pid = CRAWLER_PID.load(Ordering::SeqCst);
+                    if pid > 0 {
+                        api.prevent_exit();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.emit("confirm-exit", ());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        });
 }

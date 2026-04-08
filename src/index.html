@@ -4,142 +4,191 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DPCrawler - RAG知识爬虫</title>
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/file-icon-vectors@1.0.0/dist/file-icon-classic.min.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; overflow: hidden; }
-    
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: #334155; overflow: hidden; font-size: 13px; }
+
     .app { display: flex; flex-direction: column; height: 100vh; }
-    
-    .header { background: #3b82f6; color: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-    .header h1 { font-size: 18px; }
-    .status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
-    .status-dot.active { background: #fbbf24; animation: pulse 1s infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-    
+
+    /* Header */
+    .header { background: linear-gradient(135deg, #2563eb, #3b82f6); color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 13px; opacity: 0.95; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.5); }
+    .status-dot.active { background: #fbbf24; box-shadow: 0 0 6px rgba(251,191,36,0.5); animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
     .main { display: flex; flex: 1; overflow: hidden; }
-    
-    .sidebar { width: 280px; background: white; padding: 12px; overflow-y: auto; flex-shrink: 0; border-right: 1px solid #e5e7eb; }
-    .section { margin-bottom: 16px; }
-    .section-title { font-size: 11px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px; font-weight: 600; }
-    
-    label { display: block; font-size: 13px; color: #374151; margin-bottom: 4px; }
-    input, select { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; margin-bottom: 8px; }
-    textarea { width: 100%; min-height: 60px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; resize: vertical; }
-    input:focus, textarea:focus, select:focus { outline: none; border-color: #3b82f6; }
-    
-    .extensions { display: flex; flex-wrap: wrap; gap: 6px; }
-    .extensions label { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #f3f4f6; border-radius: 4px; cursor: pointer; margin: 0; font-size: 12px; }
-    .extensions input { width: auto; margin: 0; }
-    
-    .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+
+    /* Sidebar */
+    .sidebar { width: 362px; background: #fff; padding: 16px 14px; overflow-y: auto; flex-shrink: 0; border-right: 1px solid #e2e8f0; }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+    .section { margin-bottom: 18px; }
+    .section-title { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; font-weight: 600; }
+
+    label { display: block; font-size: 12px; color: #64748b; margin-bottom: 4px; font-weight: 500; }
+    input, select { width: 100%; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; margin-bottom: 8px; background: #f8fafc; transition: border-color 0.15s, box-shadow 0.15s; }
+    textarea { width: 100%; min-height: 56px; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; resize: vertical; background: #f8fafc; transition: border-color 0.15s, box-shadow 0.15s; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); background: #fff; }
+
+    .input-row { display: flex; gap: 4px; margin-bottom: 8px; }
+    .input-row input { flex: 1; margin: 0; }
+    .icon-btn { width: 32px; height: 32px; padding: 0; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; color: #64748b; }
+    .icon-btn:hover { background: #e2e8f0; color: #334155; }
+
+    .extensions { display: flex; flex-wrap: wrap; gap: 4px; }
+    .extensions label { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; cursor: pointer; margin: 0; font-size: 12px; font-weight: 400; color: #475569; transition: all 0.15s; user-select: none; }
+    .extensions label:hover { background: #e2e8f0; }
+    .extensions input { width: auto; margin: 0; padding: 0; }
+    .extensions input:checked + span,
+    .extensions label:has(input:checked) { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+
+    /* Buttons */
+    .btn { width: 100%; padding: 8px 12px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; margin-top: 8px; transition: all 0.15s; }
     .btn-primary { background: #3b82f6; color: white; }
-    .btn-primary:hover { background: #2563eb; }
-    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
-    .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
-    .btn-secondary:hover { background: #e5e7eb; }
-    .btn-danger { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-    .btn-danger:hover { background: #fee2e2; }
-    
-    .content { flex: 1; display: flex; flex-direction: column; padding: 12px; overflow: hidden; min-width: 0; }
-    
+    .btn-primary:hover { background: #2563eb; box-shadow: 0 1px 3px rgba(37,99,235,0.3); }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; box-shadow: none; }
+    .btn-secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-danger { background: #fff1f2; color: #e11d48; border: 1px solid #fecdd3; }
+    .btn-danger:hover { background: #ffe4e6; }
+    .btn:disabled, .btn-danger:disabled, .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+    input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; background: #f1f5f9; }
+
+    /* Content area */
+    .content { flex: 1; display: flex; flex-direction: column; padding: 14px 16px; overflow: hidden; min-width: 0; background: #f8fafc; }
+
     .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-shrink: 0; }
-    .topbar h2 { font-size: 16px; }
-    .action-buttons { display: flex; gap: 8px; }
-    .action-buttons .btn { width: auto; padding: 8px 16px; margin: 0; }
-    
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; }
-    .tab { padding: 8px 16px; border: none; background: none; font-size: 13px; color: #6b7280; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-    .tab:hover { color: #374151; }
-    .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
-    
-    .tab-content { display: none; flex: 1; overflow: hidden; }
+    .topbar h2 { font-size: 15px; font-weight: 600; color: #1e293b; }
+    .action-buttons { display: flex; gap: 6px; }
+    .action-buttons .btn { width: auto; padding: 6px 14px; margin: 0; font-size: 12px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+    .tab { padding: 8px 16px; border: none; background: none; font-size: 13px; color: #94a3b8; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; transition: color 0.15s; }
+    .tab:hover { color: #475569; }
+    .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+    .tab-content { display: none; flex: 1; overflow: hidden; padding-top: 12px; }
     .tab-content.active { display: flex; flex-direction: column; }
-    
-    .log-container { background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px; flex: 1; overflow-y: auto; white-space: pre-wrap; }
+
+    /* Log */
+    .log-container { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px; font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 12px; flex: 1; overflow-y: auto; white-space: pre-wrap; line-height: 1.6; }
+    .log-container::-webkit-scrollbar { width: 6px; }
+    .log-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     .log-info { color: #60a5fa; }
     .log-success { color: #4ade80; }
-    .log-error { color: #f87171; }
-    
-    .file-list { background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow-y: auto; flex: 1; min-width: 0; }
-    .files-panel { display: flex; flex: 1; overflow: hidden; }
-    .files-panel .file-list { flex: 0 0 280px; min-width: 150px; max-width: 60%; }
-    .panel-resizer { width: 6px; cursor: col-resize; background: #e5e7eb; flex-shrink: 0; transition: background 0.15s; }
+    .log-error { color: #fb7185; }
+
+    /* File list & preview */
+    .file-list { background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow-y: auto; flex: 1; min-width: 0; }
+    .file-list::-webkit-scrollbar { width: 4px; }
+    .file-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+    .files-panel { display: flex; flex: 1; overflow: hidden; gap: 0; }
+    .files-panel .file-list { flex: 0 0 560px; min-width: 280px; max-width: 60%; }
+    .panel-resizer { width: 5px; cursor: col-resize; background: #e2e8f0; flex-shrink: 0; transition: background 0.15s; }
     .panel-resizer:hover, .panel-resizer.active { background: #3b82f6; }
-    .preview-panel { flex: 1; display: flex; flex-direction: column; background: white; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; min-width: 0; }
-    .preview-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0; background: #f9fafb; }
-    .preview-header span { font-size: 13px; color: #374151; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .preview-open-btn { padding: 4px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background: white; color: #3b82f6; cursor: pointer; flex-shrink: 0; }
-    .preview-open-btn:hover { background: #eff6ff; }
-    .preview-content { flex: 1; padding: 16px; overflow-y: auto; font-size: 14px; line-height: 1.8; word-break: break-word; color: #1f2937; }
-    .preview-content h1 { font-size: 20px; font-weight: 700; margin: 12px 0 8px; }
-    .preview-content h2 { font-size: 18px; font-weight: 600; margin: 10px 0 6px; }
-    .preview-content h3 { font-size: 16px; font-weight: 600; margin: 8px 0 4px; }
-    .preview-content h4, .preview-content h5, .preview-content h6 { font-size: 14px; font-weight: 600; margin: 6px 0 4px; }
+    .preview-panel { flex: 1; display: flex; flex-direction: column; background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; min-width: 0; }
+    .preview-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: #f8fafc; }
+    .preview-header span { font-size: 13px; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-open-btn { padding: 4px 10px; font-size: 11px; border: 1px solid #e2e8f0; border-radius: 4px; background: white; color: #2563eb; cursor: pointer; flex-shrink: 0; font-weight: 500; transition: all 0.15s; }
+    .preview-open-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+    .preview-content { flex: 1; padding: 16px 20px; overflow-y: auto; font-size: 14px; line-height: 1.8; word-break: break-word; color: #1e293b; }
+    .preview-content::-webkit-scrollbar { width: 4px; }
+    .preview-content::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+    .preview-content h1 { font-size: 20px; font-weight: 700; margin: 16px 0 8px; color: #0f172a; }
+    .preview-content h2 { font-size: 17px; font-weight: 600; margin: 14px 0 6px; color: #1e293b; }
+    .preview-content h3 { font-size: 15px; font-weight: 600; margin: 10px 0 4px; color: #334155; }
+    .preview-content h4, .preview-content h5, .preview-content h6 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
     .preview-content p { margin: 6px 0; }
-    .preview-content a { color: #3b82f6; text-decoration: underline; }
+    .preview-content a { color: #2563eb; text-decoration: none; border-bottom: 1px solid #93c5fd; }
+    .preview-content a:hover { color: #1d4ed8; border-bottom-color: #2563eb; }
     .preview-content li { margin-left: 20px; list-style: disc; }
-    .preview-content hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
-    .preview-content img { max-width: 100%; border-radius: 4px; }
-    .preview-content table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-    .preview-content th, .preview-content td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
-    .preview-content th { background: #f3f4f6; font-weight: 600; }
-    .preview-content tr:nth-child(even) { background: #f9fafb; }
-    .file-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #f3f4f6; border-left: 3px solid transparent; cursor: pointer; outline: none; }
-    .file-item .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .file-item .file-subdir { font-size: 10px; color: #9ca3af; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; margin-right: 4px; flex-shrink: 0; white-space: nowrap; }
+    .preview-content hr { border: none; border-top: 1px solid #e2e8f0; margin: 14px 0; }
+    .preview-content img { max-width: 100%; border-radius: 6px; }
+    .preview-content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+    .preview-content th, .preview-content td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    .preview-content th { background: #f1f5f9; font-weight: 600; color: #475569; }
+    .preview-content tr:nth-child(even) { background: #f8fafc; }
+
+    /* File items */
+    .file-item { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; border-left: 3px solid transparent; cursor: pointer; outline: none; transition: background 0.1s; }
+    .file-item .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .file-item .file-subdir { font-size: 10px; color: #94a3b8; background: #f1f5f9; padding: 1px 6px; border-radius: 3px; margin-right: 4px; flex-shrink: 0; white-space: nowrap; }
     .file-item .file-type-icon { flex-shrink: 0; display: inline-flex; align-items: center; }
-    .file-item .file-type-icon .fiv-cla { font-size: 20px; line-height: 1; }
+    .file-item .file-type-icon .fiv-cla { font-size: 18px; line-height: 1; }
     .file-item .file-badge { flex-shrink: 0; }
-    .file-item:hover { background: #f9fafb; }
-    .file-item.selected { background: #dbeafe; border-left: 3px solid #3b82f6; font-weight: 500; }
-    .file-item.selected:hover { background: #dbeafe; }
+    .file-item:hover { background: #f8fafc; }
+    .file-item.selected { background: #eff6ff; border-left-color: #2563eb; }
+    .file-item.selected:hover { background: #eff6ff; }
     .file-item:last-child { border-bottom: none; }
-    .file-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-    .file-badge.new { background: #dcfce7; color: #166534; }
-    .file-badge.updated { background: #fef3c7; color: #92400e; }
-    .file-badge.unchanged { background: #f3f4f6; color: #6b7280; }
-    
-    .result-cards { display: flex; gap: 12px; margin-bottom: 12px; flex-shrink: 0; }
-    .result-card { flex: 1; background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
-    .result-card .count { font-size: 32px; font-weight: 700; }
-    .result-card .label { color: #6b7280; font-size: 13px; margin-top: 4px; }
-    .result-card.new .count { color: #22c55e; }
-    .result-card.updated .count { color: #f59e0b; }
-    .result-card.total .count { color: #3b82f6; }
-    .result-card.unchanged .count { color: #9ca3af; }
-    .result-card.errors .count { color: #ef4444; }
-    
+    .file-badge { padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; letter-spacing: 0.3px; }
+    .file-badge.new { background: #dcfce7; color: #15803d; }
+    .file-badge.updated { background: #fef3c7; color: #a16207; }
+    .file-badge.unchanged { background: #f1f5f9; color: #94a3b8; }
+
+    /* Result cards */
+    .result-cards { display: flex; gap: 10px; margin-bottom: 12px; flex-shrink: 0; }
+    .result-card { flex: 1; background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 12px; text-align: center; transition: box-shadow 0.15s; }
+    .result-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .result-card .count { font-size: 28px; font-weight: 700; }
+    .result-card .label { color: #94a3b8; font-size: 12px; margin-top: 4px; font-weight: 500; }
+    .result-card.new .count { color: #16a34a; }
+    .result-card.updated .count { color: #d97706; }
+    .result-card.total .count { color: #2563eb; }
+    .result-card.unchanged .count { color: #94a3b8; }
+    .result-card.errors .count { color: #dc2626; }
+
+    /* Progress */
     .progress { margin-bottom: 12px; flex-shrink: 0; }
-    .progress-bar { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
-    .progress-fill { height: 100%; width: 0%; background: #3b82f6; transition: width 0.3s; }
-    .progress-text { font-size: 12px; color: #6b7280; margin-top: 6px; }
+    .progress-bar { height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #2563eb); transition: width 0.3s ease; }
+    .progress-text { font-size: 12px; color: #94a3b8; margin-top: 6px; }
+
+    /* Site list */
+    .site-list { flex: 1; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }
+    .site-list::-webkit-scrollbar { width: 4px; }
+    .site-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+    .site-item { display: flex; align-items: center; padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f5f9; border-left: 3px solid transparent; transition: all 0.1s; font-size: 12px; gap: 6px; }
+    .site-item:last-child { border-bottom: none; }
+    .site-item:hover { background: #f1f5f9; }
+    .site-item.active { background: #eff6ff; border-left-color: #2563eb; font-weight: 500; }
+    .site-item .site-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
+    .site-item .site-count { font-size: 11px; color: #94a3b8; background: #f1f5f9; padding: 1px 6px; border-radius: 8px; flex-shrink: 0; }
+    .site-item .site-open { font-size: 12px; cursor: pointer; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; margin-left: 2px; }
+    .site-item:hover .site-open { opacity: 0.6; }
+    .site-item .site-open:hover { opacity: 1; }
+    .site-item.active .site-count { background: #dbeafe; color: #2563eb; }
+    .site-item.empty { color: #94a3b8; cursor: default; justify-content: center; padding: 16px; }
+    .site-item.empty:hover { background: transparent; }
   </style>
 </head>
 <body>
   <div class="app">
     <header class="header">
-      <h1>DPCrawler</h1>
+      <h1><img src="favicon.png" alt="icon" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;margin-top:-2px">DPCrawler <span style="font-size:11px;opacity:0.7;font-weight:400;margin-left:4px">RAG知识爬虫</span></h1>
       <div class="status">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">就绪</span>
+        <span id="aboutBtn" title="关于" style="cursor:pointer;margin-left:12px;opacity:0.5;font-size:14px;transition:opacity 0.15s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">ℹ️</span>
       </div>
     </header>
     
     <div class="main">
       <aside class="sidebar">
         <div class="section">
-          <div class="section-title">目标 URLs</div>
-          <textarea id="urls" placeholder="每行一个URL"></textarea>
+          <div class="section-title">目标 URL</div>
+          <input type="text" id="urls" placeholder="输入目标网站URL">
         </div>
         
         <div class="section">
           <div class="section-title">文件扩展名</div>
           <div class="extensions" id="extensions">
-            <label><input type="checkbox" value=".html" checked> .html</label>
-            <label><input type="checkbox" value=".htm" checked> .htm</label>
             <label><input type="checkbox" value=".pdf" checked> .pdf</label>
             <label><input type="checkbox" value=".doc" checked> .doc</label>
             <label><input type="checkbox" value=".docx" checked> .docx</label>
@@ -147,25 +196,17 @@
             <label><input type="checkbox" value=".xlsx" checked> .xlsx</label>
             <label><input type="checkbox" value=".ppt" checked> .ppt</label>
             <label><input type="checkbox" value=".pptx" checked> .pptx</label>
-            <label><input type="checkbox" value=".md" checked> .md</label>
-            <label><input type="checkbox" value=".txt" checked> .txt</label>
             <label><input type="checkbox" value=".csv" checked> .csv</label>
-            <label><input type="checkbox" value=".json"> .json</label>
-            <label><input type="checkbox" value=".xml"> .xml</label>
-            <label><input type="checkbox" value=".rtf"> .rtf</label>
-            <label><input type="checkbox" value=".odt"> .odt</label>
-            <label><input type="checkbox" value=".epub"> .epub</label>
-            <label><input type="checkbox" value=".yaml"> .yaml</label>
-            <label><input type="checkbox" value=".rst"> .rst</label>
-            <label><input type="checkbox" value=".tex"> .tex</label>
-            <label><input type="checkbox" value=".log"> .log</label>
           </div>
         </div>
         
         <div class="section">
           <div class="section-title">存储设置</div>
           <label>输出目录</label>
-          <input type="text" id="outputDir" value="./output">
+          <div class="input-row">
+            <input type="text" id="outputDir" value="./output">
+            <button type="button" id="browseDirBtn" class="icon-btn" title="选择目录">...</button>
+          </div>
           <label>内容格式</label>
           <select id="contentFormat">
             <option value="markdown" selected>Markdown</option>
@@ -178,26 +219,30 @@
           <div class="section-title">爬取策略</div>
           <label>请求间隔</label>
           <select id="delay">
-            <option value="0">0ms</option>
+            <option value="0">无延迟</option>
             <option value="0.1">100ms</option>
             <option value="0.2">200ms</option>
             <option value="0.3">300ms</option>
-            <option value="0.4">400ms</option>
             <option value="0.5" selected>500ms</option>
-            <option value="0.6">600ms</option>
-            <option value="0.7">700ms</option>
             <option value="0.8">800ms</option>
-            <option value="0.9">900ms</option>
+            <option value="1">1s</option>
+            <option value="2">2s</option>
           </select>
           <label>最大深度</label>
           <select id="maxDepth">
-            <option value="1" selected>1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
+            <option value="1" selected>1 层</option>
+            <option value="2">2 层</option>
+            <option value="3">3 层</option>
+            <option value="5">5 层</option>
             <option value="999">不限制</option>
           </select>
+        </div>
+
+        <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div class="section-title">已爬取站点</div>
+          <div class="site-list" id="siteList">
+            <div class="site-item empty">暂无站点</div>
+          </div>
         </div>
       </aside>
       

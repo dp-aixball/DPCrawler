@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import time
+import ssl
 import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -60,6 +61,25 @@ class WebCrawler:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (compatible; DPCrawler/1.0; +https://github.com/dpcrawler)"
         })
+        # Configure SSL adapter for compatibility with problematic certificates
+        import urllib3
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.ssl_ import create_urllib3_context
+        
+        class SSLAdapter(HTTPAdapter):
+            def init_poolmanager(self, *args, **kwargs):
+                # Force TLS 1.2 for compatibility with government sites
+                context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+                context.set_ciphers('DEFAULT:@SECLEVEL=0')
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                kwargs['ssl_context'] = context
+                return super().init_poolmanager(*args, **kwargs)
+        
+        self.session.mount('https://', SSLAdapter())
+        self.session.verify = False
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        self.ssl_fallback_hosts: Set[str] = set()  # Hosts that need HTTP fallback
         self.visited_urls: Set[str] = set()
         self.new_files: list = []
         self.updated_files: list = []
@@ -114,6 +134,10 @@ class WebCrawler:
 
         # Also process HTML pages by default
         if not "." in path.split("/")[-1]:
+            return True
+
+        # Always allow .html/.htm pages regardless of extension config
+        if path.endswith(('.html', '.htm')):
             return True
 
         return False
@@ -539,6 +563,11 @@ class WebCrawler:
 
         print(f"[{depth}] ({count}/{self.MAX_PAGES}) Crawling: {url}")
 
+        # Auto-downgrade to HTTP for known SSL-problematic hosts
+        parsed = urlparse(url)
+        if parsed.hostname in self.ssl_fallback_hosts and url.startswith('https://'):
+            url = 'http://' + url[len('https://'):]
+
         MAX_RETRIES = 3
         response = None
         for attempt in range(MAX_RETRIES):
@@ -551,6 +580,45 @@ class WebCrawler:
                 response.raise_for_status()
                 break  # Success
             except requests.RequestException as e:
+                # Check for SSL errors - try HTTP fallback
+                err_str = str(e)
+                if 'BAD_ECPOINT' in err_str or ('SSL' in err_str.upper() and 'SSLError' in err_str):
+                    if url.startswith('https://'):
+                        http_url = 'http://' + url[len('https://'):]
+                        print(f"  -> SSL error, trying HTTP fallback: {http_url}")
+                        try:
+                            response = self.session.get(http_url, timeout=30)
+                            # Accept response if it has meaningful content, even if 403
+                            if response.status_code < 400 or len(response.text) > 500:
+                                # Remember this host needs HTTP fallback
+                                host = urlparse(url).hostname
+                                if host:
+                                    self.ssl_fallback_hosts.add(host)
+                                    print(f"  -> Registered {host} for HTTP fallback")
+                                url = http_url
+                                break  # Success via HTTP
+                            response.raise_for_status()
+                        except requests.RequestException as http_e:
+                            # HTTP fallback also failed, try with User-Agent spoofing
+                            try:
+                                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                                response = self.session.get(http_url, timeout=30, headers=headers)
+                                if len(response.text) > 500:  # Got meaningful content even if 403
+                                    url = http_url
+                                    break
+                            except:
+                                pass
+                            with self._lock:
+                                self.error_count += 1
+                            print(f"  -> SSL Error and HTTP fallback both failed")
+                            print(f"  -> SSL: {e}")
+                            print(f"  -> HTTP: {http_e}")
+                            return False
+                    else:
+                        with self._lock:
+                            self.error_count += 1
+                        print(f"  -> SSL Error (unrecoverable): {e}")
+                        return False
                 # If it's a client error (e.g. 404), don't retry
                 if hasattr(e, 'response') and e.response is not None and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
                     with self._lock:
@@ -746,13 +814,32 @@ class WebCrawler:
                 return []
 
             # Fetch HTML pages to extract links
+            response = None
             try:
-                resp = self.session.get(url, timeout=15)
-                resp.raise_for_status()
-            except Exception:
-                return []
+                response = self.session.get(url, timeout=15)
+                response.raise_for_status()
+            except requests.RequestException as e:
+                # Check for SSL errors - try HTTP fallback
+                err_str = str(e)
+                if 'BAD_ECPOINT' in err_str or ('SSL' in err_str.upper() and 'SSLError' in err_str):
+                    if url.startswith('https://'):
+                        http_url = 'http://' + url[len('https://'):]
+                        try:
+                            response = self.session.get(http_url, timeout=15)
+                            # Accept response if it has meaningful content, even if 403
+                            if response.status_code < 400 or len(response.text) > 500:
+                                host = urlparse(url).hostname
+                                if host:
+                                    self.ssl_fallback_hosts.add(host)
+                                url = http_url
+                            else:
+                                response.raise_for_status()
+                        except Exception:
+                            return []
+                else:
+                    return []
 
-            content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
             if "text/html" not in content_type:
                 # Non-HTML text file - count it but don't parse for links
                 with lock:
@@ -767,9 +854,9 @@ class WebCrawler:
             count = len(discovered)
             print(f"  [pre-crawl] depth={depth} found={count} {url}")
 
-            if resp.encoding and resp.encoding.lower() == 'iso-8859-1':
-                resp.encoding = resp.apparent_encoding
-            soup = BeautifulSoup(resp.text, "html.parser")
+            if response.encoding and response.encoding.lower() == 'iso-8859-1':
+                response.encoding = response.apparent_encoding
+            soup = BeautifulSoup(response.text, "html.parser")
             child_links = []
             for link in self.extract_links(soup, url):
                 link_norm = self._normalize_url(link)
@@ -859,7 +946,14 @@ class WebCrawler:
         """Start crawling from configured URLs using BFS with concurrent workers"""
         print(f"Starting crawl with {len(self.config.urls)} URLs ({self.CONCURRENT_WORKERS} workers)")
         print(f"Output directory: {self.config.output_dir}")
-        self.base_urls = list(self.config.urls)  # set scope to configured URLs
+        # Normalize URLs: auto-add protocol prefix
+        normalized_urls = []
+        for u in self.config.urls:
+            if not u.startswith('http://') and not u.startswith('https://'):
+                u = 'https://' + u
+            normalized_urls.append(u)
+        self.config.urls = normalized_urls
+        self.base_urls = list(normalized_urls)  # set scope to configured URLs
 
         try:
             for url in self.config.urls:
@@ -868,6 +962,20 @@ class WebCrawler:
                 self.current_subdir = subdir
                 sub_output = os.path.join(self.config.output_dir, subdir)
                 self.storage = StorageManager(sub_output, self.config.enable_meta)
+                
+                # Save crawl config to site subdirectory for later restoration
+                crawl_config = {
+                    "url": url,
+                    "file_extensions": self.config.file_extensions,
+                    "content_format": self.config.content_format,
+                    "output_dir": self.config.output_dir,
+                    "delay": self.config.delay,
+                    "max_depth": self.config.max_depth,
+                    "recursive": self.config.recursive,
+                }
+                os.makedirs(sub_output, exist_ok=True)
+                with open(os.path.join(sub_output, "crawl_config.json"), "w", encoding="utf-8") as cf:
+                    json.dump(crawl_config, cf, ensure_ascii=False, indent=2)
                 
                 print(f"\nCrawling from: {url} -> {subdir}/")
                 
