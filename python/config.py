@@ -21,6 +21,7 @@ class CrawlerConfig:
     max_workers: int = 3
     recursive: bool = True
     max_depth: int = 3
+    min_year: int = 0  # 0 means no filtering
 
     @classmethod
     def from_yaml(cls, path: str) -> "CrawlerConfig":
@@ -44,6 +45,7 @@ class CrawlerConfig:
             max_workers=crawler_data.get("max_workers", 3),
             recursive=crawler_data.get("recursive", True),
             max_depth=crawler_data.get("max_depth", 3),
+            min_year=crawler_data.get("min_year", 0),
         )
 
     def to_yaml(self, path: str):
@@ -61,6 +63,7 @@ class CrawlerConfig:
                 "max_workers": self.max_workers,
                 "recursive": self.recursive,
                 "max_depth": self.max_depth,
+                "min_year": self.min_year,
             }
         }
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)

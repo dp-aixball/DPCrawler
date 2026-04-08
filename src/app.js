@@ -44,6 +44,7 @@ var el = {
   contentFormat: document.getElementById('contentFormat'),
   delay: document.getElementById('delay'),
   maxDepth: document.getElementById('maxDepth'),
+  minYear: document.getElementById('minYear'),
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   preCrawlBtn: document.getElementById('preCrawlBtn'),
@@ -111,14 +112,11 @@ function log(msg, type) {
   span.className = 'log-' + type;
   span.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg + '\n';
   el.logContainer.appendChild(span);
-  // Limit log size: remove oldest when exceeding MAX_LOG_LINES
   while (el.logContainer.childElementCount > MAX_LOG_LINES) {
     el.logContainer.removeChild(el.logContainer.firstChild);
   }
-  // Only scroll to bottom if already near bottom (avoid scroll jump during manual scroll)
-  if (el.logContainer.scrollHeight - el.logContainer.scrollTop - el.logContainer.clientHeight < 50) {
-    el.logContainer.scrollTop = el.logContainer.scrollHeight;
-  }
+  // Always scroll to bottom during crawling
+  el.logContainer.scrollTop = el.logContainer.scrollHeight;
 }
 
 // File type icon using file-icon-vectors (classic style)
@@ -286,7 +284,8 @@ function getConfig() {
       delay: parseFloat(el.delay.value) || 1,
       max_workers: 3,
       recursive: true,
-      max_depth: parseInt(el.maxDepth.value) || 3
+      max_depth: parseInt(el.maxDepth.value) || 3,
+      min_year: parseInt(el.minYear.value) || 2024
     }
   };
 }
@@ -418,7 +417,7 @@ function autoSaveConfig() {
 }
 
 // Bind auto-save to all config inputs (except delay which has special handling)
-var configInputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth];
+var configInputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth, el.minYear];
 for (var ci = 0; ci < configInputs.length; ci++) {
   configInputs[ci].addEventListener('input', autoSaveConfig);
   configInputs[ci].addEventListener('change', autoSaveConfig);
@@ -559,6 +558,8 @@ function selectSite(siteName, element) {
         if (cfg.max_depth !== undefined) el.maxDepth.value = cfg.max_depth;
         // Fill delay
         if (cfg.delay !== undefined) el.delay.value = cfg.delay;
+        // Fill min year
+        if (cfg.min_year !== undefined) el.minYear.value = cfg.min_year;
         // Fill content format
         if (cfg.content_format) el.contentFormat.value = cfg.content_format;
         // Fill file extensions checkboxes
@@ -723,6 +724,7 @@ el.startBtn.addEventListener('click', function() {
     if (data.status === 'new') logType = 'success';
     else if (data.status === 'updated') logType = 'success';
     else if (data.status === 'error') logType = 'error';
+    else if (data.line && data.line.indexOf('[skip]') !== -1) logType = 'skip';
     log(data.line, logType);
     if (data.file_name && data.status !== 'info') {
       addFileToList(data.file_name, data.status, data.url || '');
@@ -834,6 +836,19 @@ document.getElementById('clearBtn').addEventListener('click', function() {
   });
 });
 
+// Init - populate minYear dropdown
+(function initMinYear() {
+  var currentYear = new Date().getFullYear();
+  var lastYear = currentYear - 1;
+  for (var y = currentYear; y >= currentYear - 5; y--) {
+    var opt = document.createElement('option');
+    opt.value = String(y);
+    opt.textContent = y + ' 年';
+    if (y === lastYear) opt.selected = true;
+    el.minYear.appendChild(opt);
+  }
+})();
+
 // Init
 function loadSavedConfig() {
   invoke('read_config', { configPath: configPath }).then(function(yamlStr) {
@@ -870,6 +885,7 @@ function loadSavedConfig() {
       }
     }
     if (cfg.max_depth) el.maxDepth.value = cfg.max_depth;
+    if (cfg.min_year) el.minYear.value = cfg.min_year;
     // recursive is now hardcoded to true
     if (exts && exts.length) {
       el.extensions.querySelectorAll('input').forEach(function(cb) {

@@ -240,7 +240,7 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
             cmd_obj.current_dir(&work_dir)
                 .args(&args)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                .stderr(Stdio::null())
                 .env("PYTHONUNBUFFERED", "1");
 
             #[cfg(windows)]
@@ -256,64 +256,78 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
 
             let stdout = child.stdout.take().unwrap();
             let reader = BufReader::new(stdout);
-            let mut result_json = String::new();
-            let mut in_result = false;
-            let mut last_url = String::new();
+            let app_clone = app.clone();
 
-            for line in reader.lines() {
-                let line = line.unwrap_or_default();
+            // Read stdout in a dedicated thread to avoid blocking the crawler
+            let stdout_thread = std::thread::spawn(move || {
+                let mut result_json = String::new();
+                let mut in_result = false;
+                let mut last_url = String::new();
 
-                if line.contains("=== RESULT ===") {
-                    in_result = true;
-                    continue;
-                }
+                for line in reader.lines() {
+                    let line = line.unwrap_or_default();
 
-                if in_result {
-                    result_json = line;
-                    continue;
-                }
-
-                let mut file_name = String::new();
-                let mut status = "info".to_string();
-                let mut current_url = String::new();
-
-                if line.contains("Crawling:") {
-                    if let Some(url_part) = line.split("Crawling:").last() {
-                        current_url = url_part.trim().to_string();
-                        last_url = current_url.clone();
+                    if line.contains("=== RESULT ===") {
+                        in_result = true;
+                        continue;
                     }
+
+                    if in_result {
+                        result_json = line;
+                        continue;
+                    }
+
+                    let mut file_name = String::new();
+                    let mut status = "info".to_string();
+                    let mut current_url = String::new();
+
+                    if line.contains("Crawling:") {
+                        if let Some(url_part) = line.split("Crawling:").last() {
+                            current_url = url_part.trim().to_string();
+                            last_url = current_url.clone();
+                        }
+                    } else if line.contains("[skip]") {
+                        if let Some(url_part) = line.split(": ").last() {
+                            current_url = url_part.trim().to_string();
+                            last_url = current_url.clone();
+                        }
+                        status = "skip".to_string();
+                    }
+
+                    if line.contains("-> New:") {
+                        file_name = line.split("-> New:").last().unwrap_or("").trim().to_string();
+                        status = "new".to_string();
+                        current_url = last_url.clone();
+                    } else if line.contains("-> Updated:") {
+                        file_name = line.split("-> Updated:").last().unwrap_or("").trim().to_string();
+                        status = "updated".to_string();
+                        current_url = last_url.clone();
+                    } else if line.contains("-> Unchanged:") {
+                        file_name = line.split("-> Unchanged:").last().unwrap_or("").trim().to_string();
+                        status = "unchanged".to_string();
+                        current_url = last_url.clone();
+                    } else if line.contains("-> Error:") {
+                        status = "error".to_string();
+                    }
+
+                    // Non-blocking emit (ignore errors to avoid blocking stdout read)
+                    let _ = app_clone.emit("crawl-progress", CrawlProgress {
+                        line: line.clone(),
+                        file_name,
+                        status,
+                        url: current_url,
+                    });
                 }
 
-                if line.contains("-> New:") {
-                    file_name = line.split("-> New:").last().unwrap_or("").trim().to_string();
-                    status = "new".to_string();
-                    current_url = last_url.clone();
-                } else if line.contains("-> Updated:") {
-                    file_name = line.split("-> Updated:").last().unwrap_or("").trim().to_string();
-                    status = "updated".to_string();
-                    current_url = last_url.clone();
-                } else if line.contains("-> Unchanged:") {
-                    file_name = line.split("-> Unchanged:").last().unwrap_or("").trim().to_string();
-                    status = "unchanged".to_string();
-                    current_url = last_url.clone();
-                } else if line.contains("-> Error:") {
-                    status = "error".to_string();
-                }
-
-                let _ = app.emit("crawl-progress", CrawlProgress {
-                    line: line.clone(),
-                    file_name,
-                    status,
-                    url: current_url,
-                });
-            }
+                result_json
+            });
 
             CRAWLER_PID.store(0, Ordering::SeqCst);
             let exit = child.wait().map_err(|e| format!("Wait error: {}", e))?;
 
-            if !exit.success() {
-                return Err("Crawler process failed".to_string());
-            }
+            // Get result from stdout reading thread
+            let result_json = stdout_thread.join()
+                .map_err(|e| format!("Stdout reader thread panicked: {:?}", e.downcast_ref::<&str>().unwrap_or(&"unknown")))?;
 
             if result_json.is_empty() {
                 return Err("No result from crawler".to_string());
@@ -350,7 +364,7 @@ async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result<Str
             cmd_obj.current_dir(&work_dir)
                 .args(&args)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                .stderr(Stdio::null())
                 .env("PYTHONUNBUFFERED", "1");
 
             #[cfg(windows)]

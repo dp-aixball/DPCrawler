@@ -94,6 +94,7 @@ class WebCrawler:
         self.bfs_queue: deque = deque()  # BFS queue (thread-safe with lock)
         self.url_depths: dict = {}  # Track depth of each URL
         self._lock = threading.Lock()  # Protect shared state
+        self._crawl_stopped = False  # Stop flag for main crawl
 
     @staticmethod
     def _normalize_url(url: str) -> str:
@@ -546,9 +547,35 @@ class WebCrawler:
                 links.add(normalized)
         return list(links)
 
+    @staticmethod
+    def extract_max_year(text: str) -> int:
+        """Extract max year from text matching YYYY年, YYYY-MM, or YYYY/MMDD patterns. Returns 0 if no match."""
+        years = []
+        # Match \d{4}年
+        years.extend(int(y) for y in re.findall(r'(\d{4})年', text))
+        # Match date-like \d{4}-\d{1,2} (e.g. 2025-03)
+        years.extend(int(y) for y in re.findall(r'(\d{4})-\d{1,2}', text))
+        # Match date-like \d{4}/\d{2,4} (e.g. 2025/0118, 2025/1)
+        years.extend(int(y) for y in re.findall(r'(\d{4})/\d{2,4}', text))
+        # Match date-like \d{4}_\d{2,4} (e.g. 2025_1120, 2025_1)
+        years.extend(int(y) for y in re.findall(r'(\d{4})_\d{2,4}', text))
+        if not years:
+            return 0
+        return max(years)
+
     def process_page(self, url: str) -> bool:
         """Process a single page (called from BFS queue)"""
         normalized = self._normalize_url(url)
+
+        # URL year filter: check before claiming the page
+        min_year = self.config.min_year
+        if min_year:
+            min_year = int(min_year)
+            url_max_year = self.extract_max_year(url)
+            if url_max_year > 0 and url_max_year < min_year:
+                with self._lock:
+                    print(f"  -> [skip] URL year {url_max_year} < {min_year}: {url}")
+                return False
 
         # Thread-safe check and claim
         with self._lock:
@@ -578,8 +605,12 @@ class WebCrawler:
                     self.host_semaphores[parsed.hostname] = threading.Semaphore(2)
                 host_sem = self.host_semaphores[parsed.hostname]
 
+        acquired = True  # Track if semaphore was acquired
         if host_sem:
-            host_sem.acquire()
+            acquired = host_sem.acquire(timeout=30)
+            if not acquired:
+                print(f"  -> [timeout] Host semaphore wait exceeded: {url}")
+                return False
 
         response = None
         try:
@@ -640,7 +671,7 @@ class WebCrawler:
                         print(f"  -> Error after {MAX_RETRIES} tries: {e}")
                         return False
         finally:
-            if host_sem:
+            if host_sem and acquired:
                 host_sem.release()
 
         if response.encoding and response.encoding.lower() == 'iso-8859-1':
@@ -712,30 +743,39 @@ class WebCrawler:
         if content is None:
             return False
 
-        content = f"> 来源: {url}\n\n{content}"
+        # Content year filter: if content has year patterns and max < threshold, skip saving but still crawl sub-links
+        content_skip = False
+        if min_year:
+            content_max_year = self.extract_max_year(content)
+            if content_max_year > 0 and content_max_year < min_year:
+                print(f"  -> [skip] Content year {content_max_year} < {min_year}: {url}")
+                content_skip = True
 
-        with self._lock:
-            status = self.storage.save_content(
-                filename=filename,
-                content=content,
-                source_url=url,
-                title=title,
-                content_type="text/markdown",
-                raw_html=raw_html
-            )
+        if not content_skip:
+            content = f"> 来源: {url}\n\n{content}"
 
-            if status == "new":
-                full_name = self.current_subdir + '/' + filename
-                self.new_files.append(full_name)
-                print(f"  -> New: {full_name}")
-            elif status == "updated":
-                full_name = self.current_subdir + '/' + filename
-                self.updated_files.append(full_name)
-                print(f"  -> Updated: {full_name}")
-            elif status == "unchanged":
-                self.unchanged_count += 1
-                full_name = self.current_subdir + '/' + filename
-                print(f"  -> Unchanged: {full_name}")
+            with self._lock:
+                status = self.storage.save_content(
+                    filename=filename,
+                    content=content,
+                    source_url=url,
+                    title=title,
+                    content_type="text/markdown",
+                    raw_html=raw_html
+                )
+
+                if status == "new":
+                    full_name = self.current_subdir + '/' + filename
+                    self.new_files.append(full_name)
+                    print(f"  -> New: {full_name}")
+                elif status == "updated":
+                    full_name = self.current_subdir + '/' + filename
+                    self.updated_files.append(full_name)
+                    print(f"  -> Updated: {full_name}")
+                elif status == "unchanged":
+                    self.unchanged_count += 1
+                    full_name = self.current_subdir + '/' + filename
+                    print(f"  -> Unchanged: {full_name}")
 
         if sub_links:
             with self._lock:
@@ -964,6 +1004,15 @@ class WebCrawler:
 
     def crawl(self) -> CrawlResult:
         """Start crawling from configured URLs using BFS with concurrent workers"""
+        self._crawl_stopped = False
+
+        def _handle_stop(signum, frame):
+            print("\n[crawl] Stop requested...")
+            self._crawl_stopped = True
+
+        import signal
+        signal.signal(signal.SIGTERM, _handle_stop)
+
         print(f"Starting crawl with {len(self.config.urls)} URLs ({self.CONCURRENT_WORKERS} workers)")
         print(f"Output directory: {self.config.output_dir}")
         # Normalize URLs: auto-add protocol prefix
@@ -1008,6 +1057,10 @@ class WebCrawler:
                     active_futures = set()
                     
                     while True:
+                        if self._crawl_stopped:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+
                         # Submit new tasks from the queue
                         with self._lock:
                             while self.bfs_queue and len(active_futures) < self.CONCURRENT_WORKERS and self.page_count < self.MAX_PAGES:
@@ -1016,25 +1069,28 @@ class WebCrawler:
                                 active_futures.add(future)
                         
                         if not active_futures:
-                            # No active work and queue is empty - done
                             with self._lock:
                                 if not self.bfs_queue:
                                     break
                                 else:
                                     continue
                         
-                        # Wait for at least one to complete
+                        # Wait for at least one to complete (with timeout for stop check)
                         done = set()
-                        for f in as_completed(active_futures):
-                            done.add(f)
-                            break  # Process one at a time to refill queue quickly
+                        try:
+                            for f in as_completed(active_futures, timeout=2):
+                                done.add(f)
+                        except TimeoutError:
+                            pass  # Check stop flag and retry
+                        
+                        if self._crawl_stopped:
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
                         
                         active_futures -= done
                         
-                        # Check if we hit the limit
                         with self._lock:
                             if self.page_count >= self.MAX_PAGES:
-                                # Cancel remaining and drain
                                 for f in active_futures:
                                     f.cancel()
                                 break
