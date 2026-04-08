@@ -454,7 +454,7 @@ el.preCrawlBtn.addEventListener('click', function() {
     return invoke('run_pre_crawl', { configPath: configPath });
   }).then(function(jsonStr) {
     preCrawlData = JSON.parse(jsonStr);
-    invoke('save_pre_crawl_result', { data: jsonStr });
+    invoke('save_pre_crawl_result', { configPath: configPath, data: jsonStr });
     log('预爬完成: 发现 ' + preCrawlData.total + ' 个 URL，最大深度 ' + preCrawlData.max_depth, 'success');
     var depths = preCrawlData.urls_per_depth || {};
     var by = preCrawlData.by_depth || {};
@@ -702,7 +702,7 @@ if (window.__TAURI__ && window.__TAURI__.core) {
   // Load last results after a short delay to let config populate outputDir first
   setTimeout(function() { loadLastResults(); }, 200);
   // Load pre-crawl data from disk if available
-  invoke('load_pre_crawl_result').then(function(jsonStr) {
+  invoke('load_pre_crawl_result', { configPath: configPath }).then(function(jsonStr) {
     try {
       preCrawlData = JSON.parse(jsonStr);
       log('\u5df2\u52a0\u8f7d\u9884\u722c\u6570\u636e: ' + preCrawlData.total + ' \u4e2a URL', 'info');

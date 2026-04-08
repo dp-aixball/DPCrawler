@@ -372,15 +372,50 @@ fn stop_crawler() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_pre_crawl_result(data: String) -> Result<(), String> {
-    let path = data_dir().join(".pre_crawl_result.json");
+fn save_pre_crawl_result(config_path: String, data: String) -> Result<(), String> {
+    // Extract first URL from config to use in filename
+    let mut first_url = String::from("unknown");
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('-') {
+                first_url = trimmed.trim_start_matches('-').trim().to_string();
+                break;
+            }
+        }
+    }
+    // Sanitize URL for filename
+    let safe_name: String = first_url
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    
+    let filename = format!(".pre_crawl_{}.json", safe_name);
+    let path = data_dir().join(&filename);
     std::fs::write(&path, &data)
         .map_err(|e| format!("Failed to save pre-crawl result: {}", e))
 }
 
 #[tauri::command]
-fn load_pre_crawl_result() -> Result<String, String> {
-    let path = data_dir().join(".pre_crawl_result.json");
+fn load_pre_crawl_result(config_path: String) -> Result<String, String> {
+    // Extract first URL from config to find matching file
+    let mut first_url = String::from("unknown");
+    if let Ok(content) = std::fs::read_to_string(&config_path) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('-') {
+                first_url = trimmed.trim_start_matches('-').trim().to_string();
+                break;
+            }
+        }
+    }
+    let safe_name: String = first_url
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    
+    let filename = format!(".pre_crawl_{}.json", safe_name);
+    let path = data_dir().join(&filename);
     std::fs::read_to_string(&path)
         .map_err(|e| format!("No pre-crawl data: {}", e))
 }

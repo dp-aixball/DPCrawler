@@ -26,6 +26,7 @@ src-tauri/binaries/
 output/
 test_output/
 .crawl_delay
+.pre_crawl_*.json
 
 # ===== Config (local overrides) =====
 config.yaml
