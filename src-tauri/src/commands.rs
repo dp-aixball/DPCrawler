@@ -513,17 +513,45 @@ pub fn read_file_content(output_dir: String, filename: String) -> Result<String,
             base.join(site_dir).join("docs").join(format!("{}{}", file_base, ext))
         };
         if docs_path.exists() {
-            return std::fs::read_to_string(&docs_path)
-                .map_err(|e| format!("Failed to read file: {}", e));
+            let content = std::fs::read_to_string(&docs_path)
+                .map_err(|e| format!("Failed to read file: {}", e))?;
+            return Ok(render_for_preview(&content, ext));
         }
         // Legacy flat structure: site_name/file.ext
         let legacy_path = base.join(format!("{}{}", filename, ext));
         if legacy_path.exists() {
-            return std::fs::read_to_string(&legacy_path)
-                .map_err(|e| format!("Failed to read file: {}", e));
+            let content = std::fs::read_to_string(&legacy_path)
+                .map_err(|e| format!("Failed to read file: {}", e))?;
+            return Ok(render_for_preview(&content, ext));
         }
     }
     Err(format!("File not found: {}", filename))
+}
+
+/// Convert file content to HTML for preview.
+/// Markdown files are rendered via pulldown-cmark; others are wrapped in <pre>.
+fn render_for_preview(content: &str, ext: &str) -> String {
+    match ext {
+        ".md" => {
+            use pulldown_cmark::{Parser, Options, html};
+            let mut options = Options::empty();
+            options.insert(Options::ENABLE_TABLES);
+            options.insert(Options::ENABLE_STRIKETHROUGH);
+            let parser = Parser::new_ext(content, options);
+            let mut html_output = String::with_capacity(content.len() * 2);
+            html::push_html(&mut html_output, parser);
+            html_output
+        }
+        ".html" | ".htm" => content.to_string(),
+        _ => {
+            // Escape HTML and wrap in <pre> for plain text / code files
+            let escaped = content
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            format!("<pre><code>{}</code></pre>", escaped)
+        }
+    }
 }
 
 #[tauri::command]

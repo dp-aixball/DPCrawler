@@ -87,6 +87,22 @@ var el = {
 
 var activeSite = null; // currently selected site in sidebar
 
+// Event delegation for file list (single click = select, double click = open URL)
+el.fileList.addEventListener('click', function(e) {
+  var item = e.target.closest('.file-item[data-index]');
+  if (!item) return;
+  var idx = parseInt(item.dataset.index, 10);
+  var f = crawledFiles[idx];
+  if (f) selectFileItem(item, f.name, f.url);
+});
+el.fileList.addEventListener('dblclick', function(e) {
+  var item = e.target.closest('.file-item[data-index]');
+  if (!item) return;
+  var idx = parseInt(item.dataset.index, 10);
+  var f = crawledFiles[idx];
+  if (f && f.url) invoke('open_url', { url: f.url });
+});
+
 // Wire up theme selector
 el.themeSelect.value = savedTheme;
 el.themeSelect.addEventListener('change', function() {
@@ -230,6 +246,7 @@ function appendFileItem(f, index) {
   div.className = 'file-item';
   div.setAttribute('tabindex', '0');
   div.dataset.index = String(index);
+  if (f.url) div.title = f.url;
   var displayName = f.name;
   var subdir = '';
   var slashIdx = f.name.indexOf('/');
@@ -242,13 +259,6 @@ function appendFileItem(f, index) {
     fileTypeIconHtml(fileExt) +
     (subdir ? '<span class="file-subdir">' + subdir + '</span>' : '') +
     '<span class="file-name">' + displayName + '</span>';
-  (function(name, url, element) {
-    element.addEventListener('click', function() { selectFileItem(element, name, url); });
-    if (url) {
-      element.title = url;
-      element.addEventListener('dblclick', function() { invoke('open_url', { url: url }); });
-    }
-  })(f.name, f.url, div);
   el.fileList.appendChild(div);
 }
 
@@ -268,6 +278,7 @@ function renderFileList() {
     div.className = 'file-item';
     div.setAttribute('tabindex', '0');
     div.dataset.index = String(i);
+    if (f.url) div.title = f.url;
     var displayName = f.name;
     var subdir = '';
     var slashIdx = f.name.indexOf('/');
@@ -280,17 +291,6 @@ function renderFileList() {
       fileTypeIconHtml(fileExt) +
       (subdir ? '<span class="file-subdir">' + subdir + '</span>' : '') +
       '<span class="file-name">' + displayName + '</span>';
-    (function(name, url, element) {
-      element.addEventListener('click', function() {
-        selectFileItem(element, name, url);
-      });
-      if (url) {
-        element.title = url;
-        element.addEventListener('dblclick', function() {
-          invoke('open_url', { url: url });
-        });
-      }
-    })(f.name, f.url, div);
     fragment.appendChild(div);
   }
   el.fileList.innerHTML = '';
@@ -337,8 +337,8 @@ function renderFileList() {
 }
 
 function selectFileItem(element, name, url) {
-  var items = el.fileList.querySelectorAll('.file-item');
-  for (var j = 0; j < items.length; j++) items[j].classList.remove('selected');
+  var prev = el.fileList.querySelector('.file-item.selected');
+  if (prev) prev.classList.remove('selected');
   element.classList.add('selected');
   element.focus();
   loadPreview(name, url);
@@ -468,8 +468,8 @@ function loadPreview(filename, url) {
   el.previewTitle.textContent = filename;
   el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
   var outputDir = el.outputDir.value || './output';
-  invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function(content) {
-    el.previewContent.innerHTML = simpleMarkdown(content);
+  invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function(html) {
+    el.previewContent.innerHTML = html;
   }, function(e) {
     el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
   });
@@ -1025,10 +1025,8 @@ function loadLastResults() {
 if (window.__TAURI__ && window.__TAURI__.core) {
   log('DPCrawler \u5df2\u5c31\u7eea', 'success');
   loadSavedConfig();
-  setTimeout(function() {
-    loadSiteList();
-    loadLastResults();
-  }, 200);
+  loadSiteList();
+  loadLastResults();
   // Load pre-crawl data from disk if available
   invoke('load_pre_crawl_result', { configPath: configPath }).then(function(jsonStr) {
     try {

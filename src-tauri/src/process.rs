@@ -46,7 +46,7 @@ pub fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Disable WebKit cache & persistence to prevent IPC corruption
+/// Ensure single instance and write PID file for tracking
 pub fn disable_webkit_cache() {
     let pid_file = dirs::cache_dir()
         .map(|d| d.join("com.dpcrawler.app").join(".pid"))
@@ -66,17 +66,6 @@ pub fn disable_webkit_cache() {
         }
     }
 
-    let dirs_to_nuke = [
-        dirs::data_local_dir().map(|d| d.join("com.dpcrawler.app")),
-        dirs::cache_dir().map(|d| d.join("com.dpcrawler.app")),
-    ];
-    for path in dirs_to_nuke.into_iter().flatten() {
-        if path.exists() {
-            let _ = std::fs::remove_dir_all(&path);
-        }
-        let _ = std::fs::create_dir_all(&path);
-    }
-    
     if let Some(parent) = pid_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
