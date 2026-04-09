@@ -704,9 +704,3 @@ pub fn force_quit(app: tauri::AppHandle) {
     }
     app.exit(0);
 }
-
-#[tauri::command]
-pub fn show_window(window: tauri::WebviewWindow) {
-    let _ = window.show();
-}
-

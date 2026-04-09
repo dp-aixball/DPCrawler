@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-show",
+    "core:window:allow-hide",
     "core:event:default",
     "core:event:allow-listen",
     "core:event:allow-emit",

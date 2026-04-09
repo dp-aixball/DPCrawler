@@ -38,11 +38,12 @@ pub fn run() {
             commands::list_crawled_sites,
             commands::read_site_config,
             commands::read_site_index,
-            commands::force_quit,
-            commands::show_window
+            commands::force_quit
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
+
+
             let w = window.clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {

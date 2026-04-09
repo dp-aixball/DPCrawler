@@ -13,10 +13,6 @@ function applyTheme(mode) {
 var savedTheme = localStorage.getItem('dp-theme') || 'auto';
 applyTheme(savedTheme);
 
-// Show window after theme is applied to avoid white flash
-var invoke = window.__TAURI__.core.invoke;
-invoke('show_window');
-
 // Listen for system theme changes when in auto mode
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {
   if ((localStorage.getItem('dp-theme') || 'auto') === 'auto') {
@@ -170,15 +166,34 @@ function log(msg, type) {
   }
 }
 
-// File type icon using file-icon-vectors (classic style)
-// Known document extensions that have proper icons in file-icon-vectors
-var docExts = {
-  'pdf':1,'doc':1,'docx':1,'xls':1,'xlsx':1,'ppt':1,'pptx':1,
-  'csv':1,'txt':1,'rtf':1,'odt':1,'ods':1,'odp':1,
-  'zip':1,'rar':1,'7z':1,'gz':1,'tar':1,
-  'jpg':1,'jpeg':1,'png':1,'gif':1,'svg':1,'bmp':1,'webp':1,
-  'mp3':1,'mp4':1,'avi':1,'mov':1,'wav':1,
-  'json':1,'xml':1,'md':1,'yaml':1,'yml':1
+// File type icon using inline SVGs — each category has a visually distinct shape
+var lucideSvg = {
+  'pdf': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53e3e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><text x="12" y="17" text-anchor="middle" stroke="none" fill="#e53e3e" font-size="7" font-weight="bold" font-family="sans-serif">PDF</text></svg>',
+  'doc': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2b6cb0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8"/><path d="M8 17h5"/><path d="M8 9h3"/></svg>',
+  'xls': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#276749" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><rect x="7" y="12" width="10" height="7" rx="1"/><path d="M7 15.5h10"/><path d="M12 12v7"/></svg>',
+  'ppt': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c05621" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><rect x="7" y="11" width="10" height="7" rx="1.5"/><path d="M10 14h4"/></svg>',
+  'archive': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#744210" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><rect x="10" y="6" width="4" height="2"/><rect x="10" y="10" width="4" height="2"/><rect x="10" y="14" width="4" height="2"/><rect x="10" y="18" width="4" height="2"/></svg>',
+  'image': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b46c1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>',
+  'music': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d53f8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  'video': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e53e3e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 12 5.223-3.482A.5.5 0 0 1 22 8.934v6.132a.5.5 0 0 1-.777.416L16 12Z"/></svg>',
+  'code': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4a5568" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 13-2 2 2 2"/><path d="m14 17 2-2-2-2"/></svg>',
+  'globe': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3182ce" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>',
+  'txt': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#718096" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8"/><path d="M8 17h8"/></svg>',
+  'file': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>'
+};
+
+var extToIcon = {
+  'pdf':'pdf',
+  'doc':'doc','docx':'doc','rtf':'doc','odt':'doc',
+  'xls':'xls','xlsx':'xls','csv':'xls','ods':'xls',
+  'ppt':'ppt','pptx':'ppt','odp':'ppt',
+  'txt':'txt','md':'txt',
+  'zip':'archive','rar':'archive','7z':'archive','gz':'archive','tar':'archive',
+  'jpg':'image','jpeg':'image','png':'image','gif':'image','svg':'image','bmp':'image','webp':'image',
+  'mp3':'music','wav':'music',
+  'mp4':'video','avi':'video','mov':'video',
+  'json':'code','xml':'code','yaml':'code','yml':'code',
+  'html':'globe'
 };
 
 function getFileTypeFromUrl(url) {
@@ -188,14 +203,15 @@ function getFileTypeFromUrl(url) {
     var dot = pathname.lastIndexOf('.');
     if (dot !== -1) {
       var ext = pathname.substring(dot + 1).toLowerCase();
-      if (ext && ext.length <= 5 && docExts[ext]) return ext;
+      if (ext && ext.length <= 5 && extToIcon[ext]) return ext;
     }
   } catch(e) {}
   return 'html';
 }
 
 function fileTypeIconHtml(ext) {
-  return '<span class="file-type-icon"><span class="fiv-cla fiv-icon-' + ext + '"></span></span>';
+  var iconName = extToIcon[ext] || 'file';
+  return '<span class="file-type-icon">' + (lucideSvg[iconName] || lucideSvg['file']) + '</span>';
 }
 
 function addFileToList(name, status, url) {
@@ -1040,4 +1056,8 @@ document.getElementById('aboutBtn').addEventListener('click', function() {
   document.body.appendChild(overlay);
 });
 
+  // Window starts hidden (visible:false in tauri.conf.json)
+  // Show after DOM is fully mounted and ready
+  var appWindow = window.__TAURI__.window.getCurrentWindow();
+  appWindow.show();
 }); // end DOMContentLoaded

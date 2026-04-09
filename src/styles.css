@@ -93,7 +93,7 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: var(--bg-body);
   color: var(--text-main);
   overflow: hidden;
@@ -168,8 +168,8 @@ body {
   gap: 20px;
 }
 
-.sidebar::-webkit-scrollbar { width: 4px; }
-.sidebar::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+.sidebar::-webkit-scrollbar { width: 8px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 
 .sidebar-logo {
   display: flex;
@@ -516,8 +516,8 @@ input:disabled, select:disabled, textarea:disabled {
   padding: 8px;
 }
 
-.file-list::-webkit-scrollbar { width: 4px; }
-.file-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+.file-list::-webkit-scrollbar { width: 8px; }
+.file-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 
 .file-item {
   display: flex;
@@ -545,6 +545,17 @@ input:disabled, select:disabled, textarea:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-type-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.file-type-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .panel-resizer {
@@ -586,8 +597,8 @@ input:disabled, select:disabled, textarea:disabled {
   color: var(--text-main);
 }
 
-.preview-content::-webkit-scrollbar { width: 4px; }
-.preview-content::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+.preview-content::-webkit-scrollbar { width: 8px; }
+.preview-content::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 
 .preview-content table {
   border-collapse: collapse;
@@ -650,8 +661,8 @@ input:disabled, select:disabled, textarea:disabled {
   padding: 8px;
 }
 
-.site-list::-webkit-scrollbar { width: 4px; }
-.site-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+.site-list::-webkit-scrollbar { width: 8px; }
+.site-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 
 .site-item {
   display: flex;
