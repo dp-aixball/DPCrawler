@@ -14,7 +14,6 @@ python/crawler-*.spec
 
 # ===== Node.js =====
 node_modules/
-package-lock.json
 
 # ===== Rust / Tauri =====
 src-tauri/target/
