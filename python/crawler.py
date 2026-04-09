@@ -551,16 +551,33 @@ class WebCrawler:
 
     @staticmethod
     def extract_max_year(text: str) -> int:
-        """Extract max year from text matching YYYY年, YYYY-MM, or YYYY/MMDD patterns. Returns 0 if no match."""
+        """Extract max year from text matching strict date patterns. Returns 0 if no match.
+        Formats: YYYY年, YYYY-MM, YYYY/MMDD, YYYY_MMDD
+        Year: 1990-2099, Month: 01-12 (2-digit), Day: 01-31 (2-digit).
+        """
+        MONTH = r'(?:0[1-9]|1[0-2])'       # 01-12
+        DAY = r'(?:0[1-9]|[12]\d|3[01])'    # 01-31
+        YEAR = r'((?:19|20)\d{2})'           # 1990-2099
+
         years = []
-        # Match \d{4}年
-        years.extend(int(y) for y in re.findall(r'(\d{4})年', text))
-        # Match date-like \d{4}-\d{1,2} (e.g. 2025-03)
-        years.extend(int(y) for y in re.findall(r'(\d{4})-\d{1,2}', text))
-        # Match date-like \d{4}/\d{2,4} (e.g. 2025/0118, 2025/1)
-        years.extend(int(y) for y in re.findall(r'(\d{4})/\d{2,4}', text))
-        # Match date-like \d{4}_\d{2,4} (e.g. 2025_1120, 2025_1)
-        years.extend(int(y) for y in re.findall(r'(\d{4})_\d{2,4}', text))
+        # YYYY年 (e.g. 2025年)
+        for y in re.findall(YEAR + r'年', text):
+            years.append(int(y))
+        # YYYY-MM (e.g. 2025-03)
+        for y in re.findall(YEAR + r'-' + MONTH + r'(?:\b|[^0-9])', text):
+            years.append(int(y))
+        # YYYY/MMDD (e.g. 2025/0118)
+        for y in re.findall(YEAR + r'/' + MONTH + DAY + r'(?:\b|[^0-9])', text):
+            years.append(int(y))
+        # YYYY/MM (e.g. 2025/03)
+        for y in re.findall(YEAR + r'/' + MONTH + r'(?:\b|[^0-9])', text):
+            years.append(int(y))
+        # YYYY_MMDD (e.g. 2025_1120)
+        for y in re.findall(YEAR + r'_' + MONTH + DAY + r'(?:\b|[^0-9])', text):
+            years.append(int(y))
+        # YYYY_MM (e.g. 2025_03)
+        for y in re.findall(YEAR + r'_' + MONTH + r'(?:\b|[^0-9])', text):
+            years.append(int(y))
         if not years:
             return 0
         return max(years)

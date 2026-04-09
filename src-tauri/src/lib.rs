@@ -322,8 +322,8 @@ async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<Crawl
                 result_json
             });
 
-            CRAWLER_PID.store(0, Ordering::SeqCst);
             let exit = child.wait().map_err(|e| format!("Wait error: {}", e))?;
+            CRAWLER_PID.store(0, Ordering::SeqCst);
 
             // Get result from stdout reading thread
             let result_json = stdout_thread.join()
