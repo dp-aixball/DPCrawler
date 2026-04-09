@@ -538,11 +538,28 @@ function loadSiteList(autoSelectSite) {
           div.className = 'site-item';
           div.innerHTML = '<span class="site-name">' + site.name + '</span>' +
             '<span class="site-count">' + site.file_count + '</span>' +
-            '<span class="site-open" title="打开目录">📂</span>';
+            '<span class="site-open" title="打开目录">📂</span>' +
+            '<span class="site-delete" title="删除站点">🗑️</span>';
           div.querySelector('.site-open').addEventListener('click', function(e) {
             e.stopPropagation();
             var base = el.outputDir.value || './output';
             invoke('open_url', { url: base + '/' + site.name });
+          });
+          div.querySelector('.site-delete').addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (confirm('确定要彻底删除站点目录 "' + site.name + '" 吗？此操作不可恢复。')) {
+              var base = el.outputDir.value || './output';
+              invoke('delete_site', { outputDir: base, siteName: site.name }).then(function() {
+                if (activeSite === site.name) {
+                  activeSite = null;
+                  el.fileList.innerHTML = '<div class="file-item"><span>暂无文件</span></div>';
+                  el.statusText.textContent = '站点已删除';
+                }
+                loadSiteList();
+              }).catch(function(err) {
+                alert('删除失败: ' + err);
+              });
+            }
           });
           div.addEventListener('click', function() {
             if (isRunning) return;
