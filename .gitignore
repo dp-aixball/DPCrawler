@@ -45,3 +45,9 @@ Thumbs.db
 
 # ===== Qoder =====
 .qoder/
+
+# ===== Test artifacts =====
+.playwright-mcp/
+test_*.png
+verify_*.png
+test_final*.png

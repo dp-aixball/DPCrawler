@@ -1,20 +1,26 @@
 pub mod process;
 pub mod fs_utils;
 pub mod commands;
-use tauri::Emitter;
-
 use process::disable_webkit_cache;
 use process::CRAWLER_PID;
-use process::kill_pid;
 use std::sync::atomic::Ordering;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     disable_webkit_cache();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build());
+
+    // MCP Bridge only in debug builds (for AI testing); excluded from release
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         .invoke_handler(tauri::generate_handler![
             commands::run_crawler,
             commands::run_pre_crawl,
@@ -36,12 +42,13 @@ pub fn run() {
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
-            let window_clone = window.clone();
+            let w = window.clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     let pid = CRAWLER_PID.load(Ordering::SeqCst);
                     if pid > 0 {
                         api.prevent_close();
+                        let _ = w.emit("confirm-exit", ());
                     }
                 }
             });

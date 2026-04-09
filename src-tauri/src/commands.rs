@@ -192,7 +192,7 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
                 result_json
             });
 
-            let exit = child.wait().map_err(|e| format!("Wait error: {}", e))?;
+            let _exit = child.wait().map_err(|e| format!("Wait error: {}", e))?;
             CRAWLER_PID.store(0, Ordering::SeqCst);
 
             // Get result from stdout reading thread
@@ -300,9 +300,9 @@ pub async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result
             }
 
             CRAWLER_PID.store(0, Ordering::SeqCst);
-            let exit = child.wait().map_err(|e| format!("Wait error: {}", e))?;
+            let _exit = child.wait().map_err(|e| format!("Wait error: {}", e))?;
             // SIGTERM (code 143) is expected when user stops - still parse result if available
-            if !exit.success() && result_json.is_empty() {
+            if !_exit.success() && result_json.is_empty() {
                 return Err("Pre-crawl process failed".to_string());
             }
             if result_json.is_empty() {

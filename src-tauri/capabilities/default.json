@@ -8,6 +8,8 @@
     "core:event:allow-listen",
     "core:event:allow-emit",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "mcp-bridge:default",
+    "window-state:default"
   ]
 }

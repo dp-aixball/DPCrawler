@@ -311,6 +311,17 @@ select option {
   box-shadow: none;
 }
 
+input:disabled, select:disabled, textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.extensions label:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Content Area */
 .content {
   flex: 1;

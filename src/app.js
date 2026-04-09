@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', function() {
 var configPath = 'config.yaml';
 var isRunning = false;
 var crawledFiles = [];
+var crawlGeneration = 0; // guards against stale async callbacks resetting UI
 
 var preCrawlData = null; // stores pre-crawl result for progress estimation
 
@@ -454,7 +455,7 @@ el.delay.addEventListener('change', function() {
 
 // Lock/unlock all UI during crawl (only stop button remains active)
 function lockConfigInputs(lock) {
-  var inputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth];
+  var inputs = [el.urls, el.outputDir, el.contentFormat, el.maxDepth, el.minYear];
   for (var i = 0; i < inputs.length; i++) {
     inputs[i].disabled = lock;
   }
@@ -464,6 +465,15 @@ function lockConfigInputs(lock) {
   if (clearBtn) clearBtn.disabled = lock;
   if (el.browseDirBtn) el.browseDirBtn.disabled = lock;
   if (el.openDirBtn) el.openDirBtn.disabled = lock;
+  // Lock site-item action buttons (delete / open folder) and entire site list
+  document.querySelectorAll('.site-delete, .site-open').forEach(function(btn) {
+    btn.style.pointerEvents = lock ? 'none' : '';
+    btn.style.opacity = lock ? '0.3' : '';
+  });
+  if (el.siteList) {
+    el.siteList.style.pointerEvents = lock ? 'none' : '';
+    el.siteList.style.opacity = lock ? '0.5' : '';
+  }
   // delay is always editable
 }
 
@@ -661,6 +671,7 @@ if (el.browseDirBtn) {
 el.preCrawlBtn.addEventListener('click', function() {
   if (isRunning) return;
   isRunning = true;
+  var myGen = ++crawlGeneration;
   el.preCrawlBtn.disabled = true;
   el.startBtn.disabled = true;
   el.stopBtn.disabled = false;
@@ -705,12 +716,12 @@ el.preCrawlBtn.addEventListener('click', function() {
     el.progressText.textContent = '预爬完成: ' + preCrawlData.total + ' 个 URL, 最大深度 ' + preCrawlData.max_depth;
     el.statusText.textContent = '预爬完成';
     cleanupListeners();
-    resetUI();
+    if (myGen === crawlGeneration) resetUI();
   }, function(e) {
     log('预爬失败: ' + e, 'error');
     el.statusText.textContent = '预爬失败';
     cleanupListeners();
-    resetUI();
+    if (myGen === crawlGeneration) resetUI();
   });
 });
 
@@ -719,6 +730,7 @@ el.startBtn.addEventListener('click', function() {
   if (isRunning) return;
   
   isRunning = true;
+  var myGen = ++crawlGeneration;
   crawledFiles = [];
   var crawlStartTime = Date.now();
   
@@ -800,18 +812,19 @@ el.startBtn.addEventListener('click', function() {
     }
     return invoke('run_crawler', { configPath: configPath });
   }).then(function(result) {
-    onCrawlComplete(result);
+    if (myGen === crawlGeneration) onCrawlComplete(result);
     if (unlisten) unlisten();
   }, function(e) {
     log('爬取失败: ' + e, 'error');
     el.statusText.textContent = '失败';
-    resetUI();
+    if (myGen === crawlGeneration) resetUI();
     if (unlisten) unlisten();
   });
 });
 
 // Stop
 el.stopBtn.addEventListener('click', function() {
+  crawlGeneration++; // invalidate pending callbacks
   log('正在停止...');
   invoke('stop_crawler').then(function(msg) {
     log('已停止: ' + msg, 'info');
