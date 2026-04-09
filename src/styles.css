@@ -443,6 +443,7 @@ input:disabled, select:disabled, textarea:disabled {
   display: flex;
   flex: 1;
   gap: 12px;
+  min-height: 0;
 }
 
 .file-list {
@@ -518,6 +519,8 @@ input:disabled, select:disabled, textarea:disabled {
 .preview-content {
   padding: 20px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
   line-height: 1.7;
   color: var(--text-main);
 }
