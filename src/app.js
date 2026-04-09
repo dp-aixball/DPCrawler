@@ -1,6 +1,29 @@
 // DPCrawler Frontend
 document.addEventListener('DOMContentLoaded', function() {
 
+// ── Theme management ──
+function applyTheme(mode) {
+  var resolved = mode;
+  if (mode === 'auto') {
+    resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  document.documentElement.setAttribute('data-theme', resolved);
+}
+
+var savedTheme = localStorage.getItem('dp-theme') || 'auto';
+applyTheme(savedTheme);
+
+// Show window after theme is applied to avoid white flash
+var invoke = window.__TAURI__.core.invoke;
+invoke('show_window');
+
+// Listen for system theme changes when in auto mode
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {
+  if ((localStorage.getItem('dp-theme') || 'auto') === 'auto') {
+    applyTheme('auto');
+  }
+});
+
 var configPath = 'config.yaml';
 var isRunning = false;
 var crawledFiles = [];
@@ -62,11 +85,19 @@ var el = {
   totalCount: document.getElementById('totalCount'),
   previewTitle: document.getElementById('previewTitle'),
   previewContent: document.getElementById('previewContent'),
-  previewOpenBtn: document.getElementById('previewOpenBtn'),
-  siteList: document.getElementById('siteList')
+  siteList: document.getElementById('siteList'),
+  themeSelect: document.getElementById('themeSelect')
 };
 
 var activeSite = null; // currently selected site in sidebar
+
+// Wire up theme selector
+el.themeSelect.value = savedTheme;
+el.themeSelect.addEventListener('change', function() {
+  var mode = el.themeSelect.value;
+  localStorage.setItem('dp-theme', mode);
+  applyTheme(mode);
+});
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(function(tab) {
@@ -140,6 +171,16 @@ function log(msg, type) {
 }
 
 // File type icon using file-icon-vectors (classic style)
+// Known document extensions that have proper icons in file-icon-vectors
+var docExts = {
+  'pdf':1,'doc':1,'docx':1,'xls':1,'xlsx':1,'ppt':1,'pptx':1,
+  'csv':1,'txt':1,'rtf':1,'odt':1,'ods':1,'odp':1,
+  'zip':1,'rar':1,'7z':1,'gz':1,'tar':1,
+  'jpg':1,'jpeg':1,'png':1,'gif':1,'svg':1,'bmp':1,'webp':1,
+  'mp3':1,'mp4':1,'avi':1,'mov':1,'wav':1,
+  'json':1,'xml':1,'md':1,'yaml':1,'yml':1
+};
+
 function getFileTypeFromUrl(url) {
   if (!url) return 'html';
   try {
@@ -147,7 +188,7 @@ function getFileTypeFromUrl(url) {
     var dot = pathname.lastIndexOf('.');
     if (dot !== -1) {
       var ext = pathname.substring(dot + 1).toLowerCase();
-      if (ext && ext.length <= 5) return ext;
+      if (ext && ext.length <= 5 && docExts[ext]) return ext;
     }
   } catch(e) {}
   return 'html';
@@ -410,14 +451,6 @@ function simpleMarkdown(text) {
 function loadPreview(filename, url) {
   el.previewTitle.textContent = filename;
   el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
-  if (url) {
-    el.previewOpenBtn.style.display = '';
-    el.previewOpenBtn.onclick = function() {
-      invoke('open_url', { url: url });
-    };
-  } else {
-    el.previewOpenBtn.style.display = 'none';
-  }
   var outputDir = el.outputDir.value || './output';
   invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function(content) {
     el.previewContent.innerHTML = simpleMarkdown(content);
@@ -816,23 +849,26 @@ el.startBtn.addEventListener('click', function() {
     if (unlisten) unlisten();
   }, function(e) {
     log('爬取失败: ' + e, 'error');
-    el.statusText.textContent = '失败';
-    if (myGen === crawlGeneration) resetUI();
+    el.statusText.textContent = '已停止';
+    if (myGen === crawlGeneration) {
+      resetUI();
+      var crawlSite = getActiveSiteFromUrl();
+      loadSiteList(crawlSite);
+    }
     if (unlisten) unlisten();
   });
 });
 
-// Stop
+// Stop - only send signal; actual UI reset is handled by crawl completion callback
 el.stopBtn.addEventListener('click', function() {
-  crawlGeneration++; // invalidate pending callbacks
+  el.stopBtn.disabled = true;
+  el.statusText.textContent = '正在停止...';
   log('正在停止...');
   invoke('stop_crawler').then(function(msg) {
     log('已停止: ' + msg, 'info');
   }, function(e) {
     log('停止失败: ' + e, 'error');
   });
-  resetUI();
-  el.statusText.textContent = '已停止';
 });
 
 // Clear crawl results
@@ -876,7 +912,6 @@ document.getElementById('clearBtn').addEventListener('click', function() {
     el.progressText.textContent = '\u51c6\u5907\u5c31\u7eea';
     el.previewContent.textContent = '\u5355\u51fb\u5de6\u4fa7\u6587\u4ef6\u5373\u53ef\u9884\u89c8\u5185\u5bb9';
     el.previewTitle.textContent = '\u9009\u62e9\u6587\u4ef6\u9884\u89c8';
-    el.previewOpenBtn.style.display = 'none';
     // Refresh site list to remove cleared sites
     activeSite = null;
     loadSiteList();

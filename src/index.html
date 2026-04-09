@@ -1,8 +1,17 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" style="background:#0f172a">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    // Apply theme background before any rendering to prevent white flash
+    (function(){
+      var t = localStorage.getItem('dp-theme') || 'auto';
+      var light = t === 'light' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches);
+      document.documentElement.style.background = light ? '#e2e8f0' : '#0f172a';
+      document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+    })();
+  </script>
   <title>DPCrawler - RAG知识爬虫</title>
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/file-icon-vectors@1.0.0/dist/file-icon-classic.min.css">
@@ -11,17 +20,13 @@
 </head>
 <body>
   <div class="app">
-    <header class="header">
-      <h1><img src="favicon.png" alt="icon" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;margin-top:-2px">DPCrawler <span style="font-size:11px;opacity:0.7;font-weight:400;margin-left:4px">RAG知识爬虫</span></h1>
-      <div class="status">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">就绪</span>
-        <span id="aboutBtn" title="关于" style="cursor:pointer;margin-left:12px;opacity:0.5;font-size:14px;transition:opacity 0.15s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">ℹ️</span>
-      </div>
-    </header>
     
     <div class="main">
       <aside class="sidebar">
+        <div class="sidebar-logo">
+          <img src="favicon.png" alt="DPCrawler" width="32" height="32">
+          <div>DPCrawler</div>
+        </div>
         <div class="section">
           <div class="section-title">目标 URL</div>
           <input type="text" id="urls" placeholder="输入目标网站URL">
@@ -46,13 +51,19 @@
           <label>输出目录</label>
           <div class="input-row">
             <input type="text" id="outputDir" value="./output">
-            <button type="button" id="browseDirBtn" class="icon-btn" title="选择目录">...</button>
+            <button type="button" id="browseDirBtn" class="icon-btn" title="选择目录"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
           </div>
           <label>内容格式</label>
           <select id="contentFormat">
             <option value="markdown" selected>Markdown</option>
             <option value="json">JSON</option>
             <option value="txt">纯文本</option>
+          </select>
+          <label>界面主题</label>
+          <select id="themeSelect">
+            <option value="auto" selected>自动</option>
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
           </select>
         </div>
         
@@ -122,7 +133,7 @@
             <div class="preview-panel" id="previewPanel">
               <div class="preview-header">
                 <span id="previewTitle">选择文件预览</span>
-                <button class="preview-open-btn" id="previewOpenBtn" style="display:none">打开原始URL</button>
+
               </div>
               <div class="preview-content" id="previewContent">单击左侧文件即可预览内容</div>
             </div>
@@ -140,6 +151,13 @@
         </div>
       </main>
     </div>
+    <footer class="footer">
+      <div class="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">就绪</span>
+      </div>
+      <span id="aboutBtn" title="关于" style="cursor:pointer;opacity:0.5;font-size:14px;transition:opacity 0.15s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">ℹ️</span>
+    </footer>
   </div>
   
   <script src="app.js"></script>

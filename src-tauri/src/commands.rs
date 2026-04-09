@@ -451,12 +451,34 @@ pub fn delete_site(output_dir: String, site_name: String) -> Result<String, Stri
 
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
-    let path = resolve_path(url.strip_prefix("./").unwrap_or(&url));
-    let abs_str = path.to_string_lossy().to_string();
-    Command::new("xdg-open")
-        .arg(&abs_str)
-        .spawn()
-        .map_err(|e| format!("Failed to open {}: {}", abs_str, e))?;
+    let target = if url.starts_with("http://") || url.starts_with("https://") {
+        url.clone()
+    } else {
+        let path = resolve_path(url.strip_prefix("./").unwrap_or(&url));
+        path.to_string_lossy().to_string()
+    };
+
+    #[cfg(target_os = "linux")]
+    let opener = "xdg-open";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "cmd";
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new(opener)
+            .args(&["/C", "start", "", &target])
+            .spawn()
+            .map_err(|e| format!("Failed to open {}: {}", target, e))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new(opener)
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("Failed to open {}: {}", target, e))?;
+    }
     Ok(())
 }
 
@@ -529,11 +551,24 @@ pub fn list_crawled_sites(output_dir: String) -> Result<String, String> {
                             }
                         }
                     }
-                    sites.push(serde_json::json!({
-                        "name": name,
-                        "file_count": file_count,
-                        "last_updated": last_updated
-                    }));
+                    // Fallback: if index.json has no entries, count actual files in docs/
+                    if file_count == 0 {
+                        let docs_path = path.join("docs");
+                        if docs_path.is_dir() {
+                            if let Ok(files) = std::fs::read_dir(&docs_path) {
+                                file_count = files.flatten().filter(|f| f.path().is_file()).count() as u32;
+                            }
+                        }
+                    }
+                    // Show sites that have content or a saved config
+                    let has_config = path.join("crawl_config.json").exists();
+                    if file_count > 0 || index_path.exists() || has_config {
+                        sites.push(serde_json::json!({
+                            "name": name,
+                            "file_count": file_count,
+                            "last_updated": last_updated
+                        }));
+                    }
                 }
             }
         }
@@ -558,29 +593,52 @@ pub fn read_site_config(output_dir: String, site_name: String) -> Result<String,
 #[tauri::command]
 pub fn read_site_index(output_dir: String, site_name: String) -> Result<String, String> {
     let base = resolve_path(&output_dir);
-    let index_path = base.join(&site_name).join("index.json");
+    let site_dir = base.join(&site_name);
+    let index_path = site_dir.join("index.json");
+
+    let mut prefixed_tree = serde_json::Map::new();
+
+    // Try reading from index.json first
     if index_path.exists() {
-        let content = std::fs::read_to_string(&index_path)
-            .map_err(|e| format!("Failed to read site index: {}", e))?;
-        // Re-key file_tree entries with site_name prefix
-        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-            let mut prefixed_tree = serde_json::Map::new();
-            if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
-                for (name, meta) in tree {
-                    let full_name = format!("{}/{}", site_name, name);
-                    prefixed_tree.insert(full_name, meta.clone());
+        if let Ok(content) = std::fs::read_to_string(&index_path) {
+            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                    for (name, meta) in tree {
+                        let full_name = format!("{}/{}", site_name, name);
+                        prefixed_tree.insert(full_name, meta.clone());
+                    }
                 }
             }
-            let result = serde_json::json!({
-                "file_tree": prefixed_tree,
-                "total_files": prefixed_tree.len()
-            });
-            return Ok(result.to_string());
         }
-        Ok(content)
-    } else {
-        Ok("{\"file_tree\":{},\"total_files\":0}".to_string())
     }
+
+    // Fallback: if index.json has no entries, scan docs/ directory for actual files
+    if prefixed_tree.is_empty() {
+        let docs_dir = site_dir.join("docs");
+        if docs_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&docs_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                            // Strip the extension to get the display name
+                            let display = fname.rsplit_once('.').map(|(n, _)| n).unwrap_or(fname);
+                            let full_name = format!("{}/{}", site_name, display);
+                            prefixed_tree.insert(full_name, serde_json::json!({
+                                "source_url": ""
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let result = serde_json::json!({
+        "file_tree": prefixed_tree,
+        "total_files": prefixed_tree.len()
+    });
+    Ok(result.to_string())
 }
 
 #[tauri::command]
@@ -645,5 +703,10 @@ pub fn force_quit(app: tauri::AppHandle) {
         CRAWLER_PID.store(0, Ordering::SeqCst);
     }
     app.exit(0);
+}
+
+#[tauri::command]
+pub fn show_window(window: tauri::WebviewWindow) {
+    let _ = window.show();
 }
 
