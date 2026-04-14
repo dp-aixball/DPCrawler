@@ -732,3 +732,26 @@ pub fn force_quit(app: tauri::AppHandle) {
     }
     app.exit(0);
 }
+
+/// 返回应用版本信息（包含 git commit hash）
+#[tauri::command]
+pub fn get_app_version() -> Result<serde_json::Value, String> {
+    let version = env!("CARGO_PKG_VERSION");
+    let git_hash = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
+    let git_date = option_env!("GIT_COMMIT_DATE").unwrap_or("unknown");
+    
+    // 构建完整版本号：1.0.0+f49f63c
+    let full_version = if git_hash != "unknown" {
+        format!("{}+{}", version, git_hash)
+    } else {
+        version.to_string()
+    };
+    
+    Ok(serde_json::json!({
+        "version": version,
+        "full_version": full_version,
+        "git_hash": git_hash,
+        "git_date": git_date,
+        "build_time": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+    }))
+}

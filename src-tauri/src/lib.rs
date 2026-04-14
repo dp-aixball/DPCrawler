@@ -38,7 +38,8 @@ pub fn run() {
             commands::list_crawled_sites,
             commands::read_site_config,
             commands::read_site_index,
-            commands::force_quit
+            commands::force_quit,
+            commands::get_app_version
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();

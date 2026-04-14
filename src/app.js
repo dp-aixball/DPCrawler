@@ -1039,14 +1039,24 @@ if (window.__TAURI__ && window.__TAURI__.core) {
 }
 
 // About dialog
-document.getElementById('aboutBtn').addEventListener('click', function() {
+document.getElementById('aboutBtn').addEventListener('click', async function() {
+  // 获取版本信息
+  let versionInfo = { version: '1.0.0', full_version: '1.0.0', git_hash: 'unknown', git_date: 'unknown' };
+  try {
+    versionInfo = await window.__TAURI__.core.invoke('get_app_version');
+  } catch (e) {
+    console.error('Failed to get app version:', e);
+  }
+  
   var overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center';
   overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:32px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.15);max-width:360px">' +
     '<img src="favicon.png" style="width:64px;height:64px;margin-bottom:12px">' +
     '<h2 style="margin:0 0 4px;font-size:20px;color:#1e293b">DPCrawler</h2>' +
     '<p style="margin:0 0 8px;font-size:13px;color:#64748b">RAG\u77e5\u8bc6\u722c\u866b</p>' +
-    '<p style="margin:0 0 4px;font-size:12px;color:#94a3b8">v1.0.0</p>' +
+    '<p style="margin:0 0 4px;font-size:12px;color:#94a3b8">v' + versionInfo.full_version + '</p>' +
+    '<p style="margin:0 0 4px;font-size:11px;color:#b0b8c4;font-family:monospace">commit: ' + versionInfo.git_hash + '</p>' +
+    '<p style="margin:0 0 16px;font-size:11px;color:#b0b8c4">' + versionInfo.git_date + '</p>' +
     '<p style="margin:0 0 16px;font-size:12px;color:#94a3b8">\u00a9 2026 DEEPAI GROUP</p>' +
     '<button style="padding:6px 24px;border:none;background:#3b82f6;color:#fff;border-radius:6px;cursor:pointer;font-size:13px" onclick="this.closest(\'div[style]\').parentElement.remove()">\u786e\u5b9a</button>' +
     '</div>';
