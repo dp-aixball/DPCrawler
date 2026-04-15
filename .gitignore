@@ -21,6 +21,9 @@ src-tauri/gen/
 src-tauri/.cargo/
 src-tauri/binaries/
 
+# ===== Rust GUI Demo =====
+rust-gui-demo/target/
+
 # ===== Output / Runtime =====
 output/
 test_output/
