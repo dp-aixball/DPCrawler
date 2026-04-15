@@ -13,9 +13,18 @@ from urllib.parse import urljoin, urlparse
 from typing import Set, Optional, Dict
 import re
 
+import tempfile
 import requests
 from bs4 import BeautifulSoup
 import parsers
+
+try:
+    from markitdown import MarkItDown as _MarkItDown
+    _markitdown = _MarkItDown()
+    MARKITDOWN_AVAILABLE = True
+except ImportError:
+    _markitdown = None
+    MARKITDOWN_AVAILABLE = False
 
 from config import CrawlerConfig
 from storage import StorageManager, CrawlResult
@@ -30,6 +39,16 @@ class WebCrawler:
     CONCURRENT_WORKERS = 8  # Parallel crawl workers
 
     # Constants for parsing
+    BINARY_CONTENT_TYPES = {
+        "application/pdf": ".pdf",
+        "application/msword": ".doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+        "application/vnd.ms-excel": ".xls",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+        "application/vnd.ms-powerpoint": ".ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    }
+    # Fallback converters (used when MarkItDown is unavailable)
     BINARY_CONVERTERS = {
         "application/pdf": ("pdf_to_markdown", ".pdf"),
         "application/msword": ("docx_to_markdown", ".doc"),
@@ -41,9 +60,9 @@ class WebCrawler:
     }
     EXT_TO_CONVERTER = {
         ".pdf": "pdf_to_markdown",
-        ".doc": "docx_to_markdown",
+        ".doc": "doc_to_markdown",
         ".docx": "docx_to_markdown",
-        ".xls": "xlsx_to_markdown",
+        ".xls": "xls_to_markdown",
         ".xlsx": "xlsx_to_markdown",
         ".ppt": "pptx_to_markdown",
         ".pptx": "pptx_to_markdown",
@@ -120,27 +139,50 @@ class WebCrawler:
 
     def should_process_url(self, url: str) -> bool:
         """Check if URL should be processed based on config and scope"""
-        # Scope check: must be under base URL path
-        if not self._is_in_scope(url):
-            return False
-
         parsed = urlparse(url)
         path = parsed.path.lower()
 
         # Check if URL has allowed extension
+        same_domain = (not self.base_urls) or any(urlparse(b).netloc == parsed.netloc for b in self.base_urls)
         for ext in self.config.file_extensions:
             if path.endswith(ext):
-                return True
+                # Binary files: only require same domain (not strict path scope)
+                # e.g. arxiv.org/abs/2602.01478 should also fetch /pdf/2602.01478
+                return same_domain
+            # Also allow no-extension URLs under a path segment named after the extension
+            # e.g. /pdf/2602.01478 when .pdf is configured (arxiv-style)
+            ext_segment = '/' + ext.lstrip('.')
+            if (ext_segment + '/') in path or path.endswith(ext_segment):
+                return same_domain
 
-        # Also process HTML pages by default
-        if not "." in path.split("/")[-1]:
-            return True
+        # For HTML pages: strict scope check (must be under base URL path)
+        if not self._is_in_scope(url):
+            return False
 
         # Always allow .html/.htm pages regardless of extension config
         if path.endswith(('.html', '.htm')):
             return True
 
-        return False
+        # Process pages with no extension, or an unknown extension (e.g. /abs/2602.01478)
+        # Only reject if the suffix is a known non-HTML file type we don't support
+        last_segment = path.split("/")[-1]
+        if "." in last_segment:
+            suffix = "." + last_segment.rsplit(".", 1)[-1]
+            known_extensions = (
+                self.BINARY_EXTENSIONS
+                | self.PLAINTEXT_EXTENSIONS
+                | {".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+                   ".ico", ".woff", ".woff2", ".ttf", ".eot", ".mp4", ".mp3",
+                   ".zip", ".rar", ".gz", ".tar"}
+            )
+            if suffix in known_extensions:
+                # It's a known file type - only allow if in file_extensions config
+                return False
+            # Unknown suffix (e.g. numeric IDs like 2602.01478) - treat as HTML page
+            return True
+
+        # No extension: treat as HTML page
+        return True
 
     def extract_links(self, soup: BeautifulSoup, base_url: str) -> list:
         """Extract all links from HTML page, filtered by scope"""
@@ -151,8 +193,9 @@ class WebCrawler:
                 continue
             full_url = urljoin(base_url, href)
             normalized = self._normalize_url(full_url)
-            # Must be same domain AND within base URL scope
-            if urlparse(normalized).netloc == urlparse(base_url).netloc and self._is_in_scope(normalized):
+            # Must be same domain; use should_process_url for full filter logic
+            # (handles both strict scope for HTML and relaxed scope for binary files)
+            if urlparse(normalized).netloc == urlparse(base_url).netloc and self.should_process_url(normalized):
                 links.add(normalized)
         return list(links)
 
@@ -322,27 +365,59 @@ class WebCrawler:
             if self.config.recursive and depth < self.config.max_depth:
                 sub_links = self.extract_links(soup, url)
 
-        elif content_type in self.BINARY_CONVERTERS or url_ext in self.BINARY_EXTENSIONS:
-            converter_name = None
-            if content_type in self.BINARY_CONVERTERS:
-                converter_name, _ = self.BINARY_CONVERTERS[content_type]
-            elif url_ext in self.EXT_TO_CONVERTER:
-                converter_name = self.EXT_TO_CONVERTER[url_ext]
-            if converter_name:
-                try:
-                    converter = getattr(parsers, converter_name)
-                    with ThreadPoolExecutor(max_workers=1) as conv_exec:
-                        content = conv_exec.submit(converter, response.content).result(timeout=60)
-                    title = os.path.basename(parsed.path) or filename
-                except Exception as e:
-                    if isinstance(e, TimeoutError):
-                        print(f"  -> Conversion timeout (60s) for {url_ext}: {url}")
-                    else:
-                        print(f"  -> Conversion error ({url_ext}): {e}")
-                    return False
+        elif content_type in self.BINARY_CONTENT_TYPES or url_ext in self.BINARY_EXTENSIONS:
+            # Determine file extension for temp file
+            if content_type in self.BINARY_CONTENT_TYPES:
+                file_ext = self.BINARY_CONTENT_TYPES[content_type]
+            elif url_ext in self.BINARY_EXTENSIONS:
+                file_ext = url_ext
             else:
                 print(f"  -> Skipped (unsupported binary: {content_type})")
                 return False
+
+            if MARKITDOWN_AVAILABLE:
+                # Use MarkItDown: write bytes to temp file, convert, delete
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+                        tmp.write(response.content)
+                        tmp_path = tmp.name
+                    with ThreadPoolExecutor(max_workers=1) as conv_exec:
+                        content = conv_exec.submit(_markitdown.convert, tmp_path).result(timeout=60)
+                    content = content.text_content
+                    title = os.path.basename(parsed.path) or filename
+                except Exception as e:
+                    if isinstance(e, TimeoutError):
+                        print(f"  -> Conversion timeout (60s) for {file_ext}: {url}")
+                    else:
+                        print(f"  -> Conversion error ({file_ext}): {e}")
+                    return False
+                finally:
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+            else:
+                # Fallback to legacy parsers
+                converter_name = None
+                if content_type in self.BINARY_CONVERTERS:
+                    converter_name, _ = self.BINARY_CONVERTERS[content_type]
+                elif url_ext in self.EXT_TO_CONVERTER:
+                    converter_name = self.EXT_TO_CONVERTER[url_ext]
+                if converter_name:
+                    try:
+                        converter = getattr(parsers, converter_name)
+                        with ThreadPoolExecutor(max_workers=1) as conv_exec:
+                            content = conv_exec.submit(converter, response.content).result(timeout=60)
+                        title = os.path.basename(parsed.path) or filename
+                    except Exception as e:
+                        if isinstance(e, TimeoutError):
+                            print(f"  -> Conversion timeout (60s) for {file_ext}: {url}")
+                        else:
+                            print(f"  -> Conversion error ({file_ext}): {e}")
+                        return False
+                else:
+                    print(f"  -> Skipped (unsupported binary: {content_type})")
+                    return False
 
         elif content_type in self.PLAINTEXT_TYPES or url_ext in self.PLAINTEXT_EXTENSIONS:
             text = response.text.strip()
@@ -621,6 +696,139 @@ class WebCrawler:
 
         return result
 
+    def _crawl_local(self, local_path: str) -> None:
+        """Crawl a local directory or file, converting supported files to Markdown."""
+        # Normalise path (strip file:// prefix)
+        if local_path.startswith('file://'):
+            local_path = local_path[7:]
+        local_path = os.path.abspath(local_path)
+
+        if not os.path.exists(local_path):
+            print(f"  [local] Path not found: {local_path}")
+            return
+
+        # Collect all candidate files
+        if os.path.isfile(local_path):
+            file_list = [local_path]
+            base_dir = os.path.dirname(local_path)
+        else:
+            file_list = []
+            base_dir = local_path
+            for root, _, files in os.walk(local_path):
+                for fname in files:
+                    file_list.append(os.path.join(root, fname))
+
+        # Determine accepted extensions
+        accepted_exts = set(self.config.file_extensions) if self.config.file_extensions else None
+        all_binary_exts = self.BINARY_EXTENSIONS
+        all_plain_exts = self.PLAINTEXT_EXTENSIONS | {'.html', '.htm'}
+        all_known_exts = all_binary_exts | all_plain_exts
+
+        total = 0
+        for fpath in sorted(file_list):
+            if self._crawl_stopped:
+                break
+
+            ext = os.path.splitext(fpath)[1].lower()
+
+            # Extension filter: if user configured extensions, only those; else all known
+            if accepted_exts:
+                if ext not in accepted_exts:
+                    continue
+            else:
+                if ext not in all_known_exts:
+                    continue
+
+            total += 1
+            source_url = 'file://' + fpath
+            rel = os.path.relpath(fpath, base_dir)
+            filename = re.sub(r'[^\w\-]', '_', rel.replace(os.sep, '_'))
+            print(f"[local] ({total}) Converting: {rel}")
+
+            try:
+                content = None
+                title = os.path.basename(fpath)
+
+                if ext in {'.html', '.htm'}:
+                    # HTML: use existing html_to_markdown + extract_body_content
+                    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                        html_text = f.read()
+                    soup = BeautifulSoup(html_text, 'html.parser')
+                    title = parsers.extract_title(soup)
+                    raw_content = parsers.html_to_markdown(html_text, source_url)
+                    content = parsers.extract_body_content(raw_content)
+
+                elif ext in all_plain_exts - {'.html', '.htm'}:
+                    # Plain text files
+                    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                        text = f.read().strip()
+                    lang = ext.lstrip('.')
+                    if lang == 'yml':
+                        lang = 'yaml'
+                    if ext in {'.json', '.xml', '.yaml', '.yml', '.csv'}:
+                        content = f'```{lang}\n{text}\n```'
+                    else:
+                        content = text
+
+                elif MARKITDOWN_AVAILABLE:
+                    # Binary files: use MarkItDown (with fallback)
+                    try:
+                        result = _markitdown.convert(fpath)
+                        content = result.text_content
+                    except Exception:
+                        # MarkItDown failed, try legacy fallback
+                        converter_name = self.EXT_TO_CONVERTER.get(ext)
+                        if converter_name:
+                            converter = getattr(parsers, converter_name)
+                            with open(fpath, 'rb') as f:
+                                data = f.read()
+                            content = converter(data)
+                        else:
+                            raise  # No legacy converter, re-raise the error
+
+                else:
+                    # Fallback: legacy parsers
+                    converter_name = self.EXT_TO_CONVERTER.get(ext)
+                    if converter_name:
+                        converter = getattr(parsers, converter_name)
+                        with open(fpath, 'rb') as f:
+                            data = f.read()
+                        content = converter(data)
+                    else:
+                        print(f"  [local] Skipped (no converter): {rel}")
+                        continue
+
+                if content is None:
+                    continue
+
+                content = f"> 来源: {source_url}\n\n{content}"
+
+                with self._lock:
+                    status = self.storage.save_content(
+                        filename=filename,
+                        content=content,
+                        source_url=source_url,
+                        title=title,
+                        content_type='text/markdown',
+                        raw_html=None
+                    )
+                    if status == 'new':
+                        full_name = self.current_subdir + '/' + filename
+                        self.new_files.append(full_name)
+                        print(f"  -> New: {full_name}")
+                    elif status == 'updated':
+                        full_name = self.current_subdir + '/' + filename
+                        self.updated_files.append(full_name)
+                        print(f"  -> Updated: {full_name}")
+                    elif status == 'unchanged':
+                        self.unchanged_count += 1
+                        print(f"  -> Unchanged")
+                    self.page_count += 1
+
+            except Exception as e:
+                print(f"  [local] Error converting {rel}: {e}")
+                self.error_count += 1
+
     def crawl(self) -> CrawlResult:
         """Start crawling from configured URLs using BFS with concurrent workers"""
         self._crawl_stopped = False
@@ -628,7 +836,6 @@ class WebCrawler:
         def _handle_stop(signum, frame):
             print("\n[crawl] Stop requested...")
             self._crawl_stopped = True
-            # Close session to abort in-flight requests immediately
             try:
                 self.session.close()
             except:
@@ -639,18 +846,61 @@ class WebCrawler:
 
         print(f"Starting crawl with {len(self.config.urls)} URLs ({self.CONCURRENT_WORKERS} workers)")
         print(f"Output directory: {self.config.output_dir}")
+
         # Normalize URLs: auto-add protocol prefix
         normalized_urls = []
         for u in self.config.urls:
-            if not u.startswith('http://') and not u.startswith('https://'):
+            if not u.startswith('http://') and not u.startswith('https://') and not u.startswith('file://'):
                 u = 'https://' + u
             normalized_urls.append(u)
         self.config.urls = normalized_urls
         self.base_urls = list(normalized_urls)  # set scope to configured URLs
 
+        # Split local vs remote URLs
+        local_urls = [u for u in self.config.urls if u.startswith('file://')]
+        remote_urls = [u for u in self.config.urls if not u.startswith('file://')]
+
         try:
-            for url in self.config.urls:
-                # Create subdirectory per target URL domain
+            # --- Local file/folder mode ---
+            for url in local_urls:
+                # Reset counters for each crawl session
+                self.new_files = []
+                self.updated_files = []
+                self.unchanged_count = 0
+                self.error_count = 0
+                self.page_count = 0
+
+                local_path = url[7:]  # strip file://
+                # Use full relative path as subdir (replace separators and illegal chars)
+                # e.g. /media/zhyi/RAID/tmp/docs -> media_zhyi_RAID_tmp_docs
+                subdir = re.sub(r'[^\w\-]', '_', local_path.strip('/\\').replace(os.sep, '_'))
+                if not subdir:
+                    subdir = 'local'
+                self.current_subdir = subdir
+                sub_output = os.path.join(self.config.output_dir, subdir)
+                self.storage = StorageManager(sub_output, self.config.enable_meta)
+                crawl_config = {
+                    "url": url,
+                    "file_extensions": self.config.file_extensions,
+                    "content_format": self.config.content_format,
+                    "output_dir": self.config.output_dir,
+                }
+                os.makedirs(sub_output, exist_ok=True)
+                with open(os.path.join(sub_output, 'crawl_config.json'), 'w', encoding='utf-8') as cf:
+                    json.dump(crawl_config, cf, ensure_ascii=False, indent=2)
+
+                print(f"\nCrawling local: {local_path} -> {subdir}/")
+                self._crawl_local(url)
+                self.storage.finalize(self.new_files, self.updated_files, [])
+
+            # --- Remote HTTP/HTTPS mode ---
+            for url in remote_urls:
+                # Reset counters for each crawl session
+                self.new_files = []
+                self.updated_files = []
+                self.unchanged_count = 0
+                self.error_count = 0
+                self.page_count = 0
                 subdir = self._get_url_subdir(url)
                 self.current_subdir = subdir
                 sub_output = os.path.join(self.config.output_dir, subdir)

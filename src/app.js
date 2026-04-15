@@ -699,6 +699,11 @@ function getActiveSiteFromUrl() {
   var url = el.urls.value.trim();
   if (!url) return null;
   try {
+    // Handle file:// URLs: convert path to subdir name
+    if (url.indexOf('file://') === 0) {
+      var path = url.substring(7); // strip file://
+      return path.replace(/^\/+|\/+$/g, '').replace(/[\/\\]/g, '_').replace(/[^\w\-]/g, '_') || null;
+    }
     var a = document.createElement('a');
     a.href = url;
     return a.hostname || null;

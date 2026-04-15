@@ -28,6 +28,16 @@ except ImportError:
     openpyxl = None
 
 try:
+    import xlrd
+except ImportError:
+    xlrd = None
+
+try:
+    import olefile
+except ImportError:
+    olefile = None
+
+try:
     from pptx import Presentation as PptxPresentation
 except ImportError:
     PptxPresentation = None
@@ -231,6 +241,197 @@ def html_to_markdown(html: str, base_url: str = "") -> str:
     return result_md
 
 
+def doc_to_markdown(data: bytes) -> str:
+    """Convert old .doc (OLE binary) to Markdown using olefile (piece table extraction)"""
+    if olefile is None:
+        return "[.doc conversion unavailable: install olefile]"
+    
+    try:
+        ole = olefile.OleFileIO(io.BytesIO(data))
+        
+        # Check if it's a valid Word document
+        if not ole.exists('WordDocument'):
+            return "[.doc conversion failed: not a valid Word document]"
+        
+        # Read WordDocument stream
+        word_doc = ole.openstream('WordDocument').read()
+        
+        if len(word_doc) < 34:
+            return "[.doc conversion failed: file too small]"
+        
+        # Check magic number
+        w_ident = word_doc[0] | (word_doc[1] << 8)
+        if w_ident != 0xA5EC:
+            return "[.doc conversion failed: invalid Word format]"
+        
+        # Determine which Table stream to use (0Table or 1Table)
+        flags = word_doc[0x0A] | (word_doc[0x0B] << 8)
+        f_which_tbl = (flags >> 9) & 1
+        table_name = '1Table' if f_which_tbl == 1 else '0Table'
+        
+        # Parse FIB to find CLX (piece table)
+        csw = word_doc[32] | (word_doc[33] << 8)
+        rg_w_end = 34 + csw * 2
+        
+        if len(word_doc) < rg_w_end + 2:
+            return "[.doc conversion failed: invalid FIB structure]"
+        
+        cslw = word_doc[rg_w_end] | (word_doc[rg_w_end + 1] << 8)
+        rg_lw_start = rg_w_end + 2
+        
+        # ccpText is at index 3 in fibRgLw
+        if cslw < 4:
+            return "[.doc conversion failed: no text content]"
+        ccp_text = (word_doc[rg_lw_start + 12] | (word_doc[rg_lw_start + 13] << 8) | 
+                    (word_doc[rg_lw_start + 14] << 16) | (word_doc[rg_lw_start + 15] << 24))
+        if ccp_text == 0:
+            return ""
+        
+        # Find fcClx/lcbClx (pair 33 in fibRgFcLcb)
+        rg_lw_end = rg_lw_start + cslw * 4
+        if len(word_doc) < rg_lw_end + 2:
+            return "[.doc conversion failed: truncated FIB]"
+        cb_rg_fc_lcb = word_doc[rg_lw_end] | (word_doc[rg_lw_end + 1] << 8)
+        
+        if cb_rg_fc_lcb <= 33:
+            return "[.doc conversion failed: no CLX found]"
+        
+        fc_clx_offset = rg_lw_end + 2 + 33 * 8
+        if len(word_doc) < fc_clx_offset + 8:
+            return "[.doc conversion failed: truncated CLX info]"
+        
+        fc_clx = (word_doc[fc_clx_offset] | (word_doc[fc_clx_offset + 1] << 8) | 
+                  (word_doc[fc_clx_offset + 2] << 16) | (word_doc[fc_clx_offset + 3] << 24))
+        lcb_clx = (word_doc[fc_clx_offset + 4] | (word_doc[fc_clx_offset + 5] << 8) | 
+                   (word_doc[fc_clx_offset + 6] << 16) | (word_doc[fc_clx_offset + 7] << 24))
+        
+        if lcb_clx == 0:
+            return "[.doc conversion failed: empty CLX]"
+        
+        # Read Table stream
+        if not ole.exists(table_name):
+            return "[.doc conversion failed: table stream missing]"
+        table_data = ole.openstream(table_name).read()
+        
+        if fc_clx + lcb_clx > len(table_data):
+            return "[.doc conversion failed: CLX out of bounds]"
+        
+        # Parse CLX to find piece table
+        clx = table_data[fc_clx:fc_clx + lcb_clx]
+        pos = 0
+        
+        # Skip Prc records (0x01), find Pcdt (0x02)
+        while pos < len(clx):
+            if clx[pos] == 0x01:
+                if pos + 3 > len(clx):
+                    break
+                cb = clx[pos + 1] | (clx[pos + 2] << 8)
+                pos += 3 + cb
+            elif clx[pos] == 0x02:
+                pos += 1
+                break
+            else:
+                break
+        
+        if pos + 4 > len(clx):
+            return "[.doc conversion failed: no piece table]"
+        
+        lcb_plc_pcd = (clx[pos] | (clx[pos + 1] << 8) | 
+                       (clx[pos + 2] << 16) | (clx[pos + 3] << 24))
+        pos += 4
+        
+        if pos + lcb_plc_pcd > len(clx) or lcb_plc_pcd < 16:
+            return "[.doc conversion failed: invalid piece table]"
+        
+        plc_pcd = clx[pos:pos + lcb_plc_pcd]
+        
+        # Parse pieces
+        n = (lcb_plc_pcd - 4) // 12
+        if n == 0:
+            return "[.doc conversion failed: no pieces]"
+        
+        pcd_start = (n + 1) * 4
+        text_parts = []
+        
+        for i in range(n):
+            cp_start = (plc_pcd[i * 4] | (plc_pcd[i * 4 + 1] << 8) | 
+                        (plc_pcd[i * 4 + 2] << 16) | (plc_pcd[i * 4 + 3] << 24))
+            cp_end = (plc_pcd[(i + 1) * 4] | (plc_pcd[(i + 1) * 4 + 1] << 8) | 
+                      (plc_pcd[(i + 1) * 4 + 2] << 16) | (plc_pcd[(i + 1) * 4 + 3] << 24))
+            char_count = max(0, cp_end - cp_start)
+            
+            if char_count == 0 or cp_start >= ccp_text:
+                continue
+            
+            effective_count = min(char_count, ccp_text - cp_start)
+            
+            pcd_offset = pcd_start + i * 8
+            if pcd_offset + 6 > len(plc_pcd):
+                break
+            
+            fc_raw = (plc_pcd[pcd_offset + 2] | (plc_pcd[pcd_offset + 3] << 8) | 
+                      (plc_pcd[pcd_offset + 4] << 16) | (plc_pcd[pcd_offset + 5] << 24))
+            is_compressed = (fc_raw & 0x40000000) != 0
+            fc = fc_raw & 0x3FFFFFFF
+            
+            if is_compressed:
+                # ANSI: 1 byte = 1 char
+                byte_start = fc // 2
+                byte_end = byte_start + effective_count
+                if byte_end > len(word_doc):
+                    continue
+                
+                chars = []
+                for b in word_doc[byte_start:byte_end]:
+                    if b == 0x0D or b == 0x0C:
+                        chars.append('\n')
+                    elif b == 0x07:
+                        chars.append('\t')
+                    elif b >= 0x20:
+                        chars.append(chr(b))
+                text_parts.append(''.join(chars))
+            else:
+                # Unicode UTF-16LE: 2 bytes = 1 char
+                byte_start = fc
+                byte_end = byte_start + effective_count * 2
+                if byte_end > len(word_doc):
+                    continue
+                
+                u16s = []
+                for j in range(byte_start, byte_end, 2):
+                    if j + 1 < len(word_doc):
+                        u16s.append(word_doc[j] | (word_doc[j + 1] << 8))
+                
+                try:
+                    decoded = ''.join(chr(c) for c in u16s)
+                except:
+                    decoded = ''.join(chr(c) if c < 0x10000 else '?' for c in u16s)
+                
+                # Normalize control chars
+                cleaned = []
+                for ch in decoded:
+                    if ch == '\r' or ch == '\x0C':
+                        cleaned.append('\n')
+                    elif ch == '\x07':
+                        cleaned.append('\t')
+                    elif ch >= ' ' or ch == '\n' or ch == '\t':
+                        cleaned.append(ch)
+                text_parts.append(''.join(cleaned))
+        
+        ole.close()
+        
+        result = ''.join(text_parts).strip()
+        if not result:
+            return "[.doc conversion failed: no text extracted]"
+        
+        # Clean up excessive blank lines
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result
+        
+    except Exception as e:
+        return f"[.doc conversion error: {e}]"
+
+
 def pdf_to_markdown(data: bytes) -> str:
     """Convert PDF binary data to Markdown text"""
     if pdfplumber is None:
@@ -310,6 +511,58 @@ def docx_to_markdown(data: bytes) -> str:
                 lines.append('| ' + ' | '.join(r) + ' |')
             lines.append('')
     return '\n'.join(lines).strip()
+
+
+def xls_to_markdown(data: bytes) -> str:
+    """Convert old .xls (OLE binary) to Markdown tables using xlrd"""
+    if xlrd is None:
+        return "[XLS conversion unavailable: install xlrd]"
+    
+    try:
+        wb = xlrd.open_workbook(file_contents=data)
+        lines = []
+        
+        for sheet_idx in range(wb.nsheets):
+            sheet = wb.sheet_by_index(sheet_idx)
+            lines.append(f'## {sheet.name}')
+            lines.append('')
+            
+            if sheet.nrows == 0:
+                lines.append('*空工作表*')
+                lines.append('')
+                continue
+            
+            # Build Markdown table
+            max_cols = sheet.ncols
+            rows = []
+            for row_idx in range(sheet.nrows):
+                cells = []
+                for col_idx in range(max_cols):
+                    cell = sheet.cell(row_idx, col_idx)
+                    if cell.ctype == xlrd.XL_CELL_EMPTY:
+                        cells.append('')
+                    elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                        # Format number: remove trailing .0 for integers
+                        val = cell.value
+                        if val == int(val):
+                            cells.append(str(int(val)))
+                        else:
+                            cells.append(str(val))
+                    else:
+                        cells.append(str(cell.value).strip().replace('|', '\\|'))
+                rows.append(cells)
+            
+            if rows:
+                # First row as header
+                lines.append('| ' + ' | '.join(rows[0]) + ' |')
+                lines.append('| ' + ' | '.join(['---'] * max_cols) + ' |')
+                for row in rows[1:]:
+                    lines.append('| ' + ' | '.join(row) + ' |')
+            lines.append('')
+        
+        return '\n'.join(lines).strip()
+    except Exception as e:
+        return f"[XLS conversion error: {e}]"
 
 
 def xlsx_to_markdown(data: bytes) -> str:
