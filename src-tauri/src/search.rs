@@ -131,6 +131,18 @@ impl SearchIndex {
         }
 
         let n = self.docs.len() as f64;
+
+        // 计算当前查询语句的理论极限最大得分（用于 0-1 归一化）
+        let mut max_possible_score = 0.0;
+        for token in &query_tokens {
+            if let Some(&df) = self.df.get(token) {
+                // IDF 也是标准的计算方式
+                let idf = ((n - df as f64 + 0.5) / (df as f64 + 0.5) + 1.0).ln();
+                // 极限情况下，当文档长度趋近 0，词频无穷大时，TF项上限为 K1 + 1.0
+                max_possible_score += idf * (K1 + 1.0);
+            }
+        }
+
         let mut scores: Vec<(usize, f64)> = self
             .docs
             .iter()
@@ -158,6 +170,11 @@ impl SearchIndex {
                 if !query_tokens.is_empty() && score > 0.0 {
                     let coverage = matched_tokens as f64 / query_tokens.len() as f64;
                     score = score * coverage.powf(1.5);
+                }
+
+                // 进行统一的百分比归一化 (0~1)
+                if max_possible_score > 0.0 {
+                    score = (score / max_possible_score).clamp(0.0, 1.0);
                 }
 
                 (i, score)
