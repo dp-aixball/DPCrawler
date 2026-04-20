@@ -672,34 +672,7 @@ pub fn read_markdown_raw(output_dir: String, filename: String) -> Result<String,
 
 #[tauri::command]
 pub fn get_processed_file_path(output_dir: String, filename: String) -> Result<String, String> {
-    let base = resolve_path(&output_dir);
-    let parts: Vec<&str> = filename.splitn(2, '/').collect();
-    let (site_dir, file_base) = if parts.len() == 2 {
-        (parts[0], parts[1])
-    } else {
-        ("", filename.as_str())
-    };
-
-    for ext in &[
-        ".md", ".html", ".htm", ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".csv", ".xml", ".json", ".rtf", ".odt", ".epub", ".rst", ".yaml", ".yml", ".log", ".tex",
-    ] {
-        let docs_path = if site_dir.is_empty() {
-            base.join("docs").join(format!("{}{}", file_base, ext))
-        } else {
-            base.join(site_dir)
-                .join("docs")
-                .join(format!("{}{}", file_base, ext))
-        };
-        if docs_path.exists() {
-            return Ok(docs_path.to_string_lossy().into_owned());
-        }
-        let legacy_path = base.join(format!("{}{}", filename, ext));
-        if legacy_path.exists() {
-            return Ok(legacy_path.to_string_lossy().into_owned());
-        }
-    }
-    Err(format!("Path not found for: {}", filename))
+    crate::fs_utils::get_processed_file_path_core(&output_dir, &filename)
 }
 
 /// Convert file content to HTML for preview.
@@ -892,56 +865,7 @@ pub fn read_site_config(output_dir: String, site_name: String) -> Result<String,
 
 #[tauri::command]
 pub fn read_site_index(output_dir: String, site_name: String) -> Result<String, String> {
-    let base = resolve_path(&output_dir);
-    let site_dir = base.join(&site_name);
-    let index_path = site_dir.join("index.json");
-
-    let mut prefixed_tree = serde_json::Map::new();
-
-    // Try reading from index.json first
-    if index_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&index_path) {
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
-                    for (name, meta) in tree {
-                        let full_name = format!("{}/{}", site_name, name);
-                        prefixed_tree.insert(full_name, meta.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: if index.json has no entries, scan docs/ directory for actual files
-    if prefixed_tree.is_empty() {
-        let docs_dir = site_dir.join("docs");
-        if docs_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&docs_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
-                            // Strip the extension to get the display name
-                            let display = fname.rsplit_once('.').map(|(n, _)| n).unwrap_or(fname);
-                            let full_name = format!("{}/{}", site_name, display);
-                            prefixed_tree.insert(
-                                full_name,
-                                serde_json::json!({
-                                    "source_url": ""
-                                }),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let result = serde_json::json!({
-        "file_tree": prefixed_tree,
-        "total_files": prefixed_tree.len()
-    });
-    Ok(result.to_string())
+    crate::fs_utils::read_site_index_core(&output_dir, &site_name)
 }
 
 #[tauri::command]
@@ -1215,66 +1139,5 @@ pub async fn api_search(
     top_k: usize,
     threshold: f64,
 ) -> Result<Vec<crate::search::SearchResult>, String> {
-    if query.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut index = crate::search::SearchIndex::new();
-
-    if let Ok(site_index_json) = read_site_index(output_dir.clone(), site_name.clone()) {
-        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&site_index_json) {
-            if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
-                for (full_name, meta) in tree {
-                    if let Ok(docs_path) =
-                        get_processed_file_path(output_dir.clone(), full_name.to_string())
-                    {
-                        if docs_path.ends_with(".md") {
-                            if let Ok(body) = std::fs::read_to_string(&docs_path) {
-                                let mut text = body.as_str();
-
-                                if text.starts_with("---") {
-                                    if let Some(end_idx) = text[3..].find("\n---") {
-                                        text = &text[3 + end_idx + 4..];
-                                    }
-                                } else if text.starts_with("```yaml") || text.starts_with("```ymal")
-                                {
-                                    if let Some(end_idx) = text[7..].find("\n```") {
-                                        text = &text[7 + end_idx + 4..];
-                                    }
-                                }
-
-                                let title = meta
-                                    .get("title")
-                                    .and_then(|t| t.as_str())
-                                    .unwrap_or(full_name.as_str())
-                                    .to_string();
-                                let mut url = String::new();
-                                if let Some(u) = meta.get("source_url").and_then(|u| u.as_str()) {
-                                    url = u.to_string();
-                                }
-
-                                index.add_document(
-                                    full_name.to_string(),
-                                    title,
-                                    text.to_string(),
-                                    url,
-                                    docs_path,
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    index.build();
-    let mut results = index.search(&query, top_k);
-
-    // Apply threshold filtering
-    if threshold > 0.0 {
-        results.retain(|r| r.score >= threshold);
-    }
-
-    Ok(results)
+    crate::search::perform_api_search(output_dir, site_name, query, top_k, threshold).await
 }

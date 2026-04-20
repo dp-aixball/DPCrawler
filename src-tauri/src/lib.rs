@@ -1,13 +1,21 @@
+#[cfg(feature = "desktop")]
 pub mod commands;
 pub mod fs_utils;
+#[cfg(feature = "desktop")]
 pub mod process;
 pub mod search;
 pub mod server;
+
+#[cfg(feature = "desktop")]
 use process::disable_webkit_cache;
+#[cfg(feature = "desktop")]
 use process::CRAWLER_PID;
+#[cfg(feature = "desktop")]
 use std::sync::atomic::Ordering;
+#[cfg(feature = "desktop")]
 use tauri::{Emitter, Manager};
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     disable_webkit_cache();

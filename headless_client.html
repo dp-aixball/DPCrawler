@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DPCrawler RAG Core Tester</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: rgba(30, 41, 59, 0.7);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+            color: var(--text);
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            animation: fadeIn 0.8s ease-out;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0 0 0.5rem 0;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            margin: 0;
+        }
+
+        .glass-panel {
+            background: var(--surface);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            margin-bottom: 2rem;
+            animation: slideUp 0.6s ease-out;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        input {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            color: var(--text);
+            font-size: 1rem;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        button {
+            background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            padding: 1rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 1.5rem;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .results {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .result-card {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .result-card:hover {
+            background: rgba(30, 41, 59, 0.8);
+            border-color: rgba(96, 165, 250, 0.5);
+            transform: scale(1.01);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .result-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin: 0;
+            color: #60a5fa;
+            word-break: break-all;
+        }
+
+        .score-badge {
+            background: rgba(59, 130, 246, 0.1);
+            color: #60a5fa;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            white-space: nowrap;
+        }
+
+        .snippet {
+            font-size: 0.9rem;
+            line-height: 1.6;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        mark {
+            background: rgba(234, 179, 8, 0.2);
+            color: #fde047;
+            padding: 0 0.25rem;
+            border-radius: 0.25rem;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .btn-link {
+            text-decoration: none;
+            color: #c084fc;
+            font-size: 0.875rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            transition: color 0.2s;
+        }
+
+        .btn-link:hover {
+            color: #e879f9;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 10px #22c55e;
+            display: inline-block;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+            font-style: italic;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>RAG Core Engine</h1>
+            <p><span class="status-dot"></span> Headless HTTP Server `http://127.0.0.1:18088`</p>
+        </div>
+
+        <div class="glass-panel">
+            <form id="searchForm">
+                <div class="form-grid">
+                    <div class="input-group">
+                        <label>Output Dir</label>
+                        <input type="text" id="output_dir" value="output" placeholder="默认留空读取 Tauri 数据目录">
+                    </div>
+                    <div class="input-group">
+                        <label>Site Name</label>
+                        <input type="text" id="site_name" value="www.bjeea.cn" placeholder="如 baidu_com 等">
+                    </div>
+                </div>
+                <br>
+                <div class="form-grid">
+                    <div class="input-group" style="grid-column: 1 / -1;">
+                        <label>Search Query</label>
+                        <input type="text" id="query" required placeholder="输入你要找的关键词或长句"
+                            style="font-size: 1.25rem; padding: 1rem;">
+                    </div>
+                    <div class="input-group">
+                        <label>Top K</label>
+                        <input type="number" id="top_k" value="10" min="1" max="100">
+                    </div>
+                    <div class="input-group">
+                        <label>Threshold (0.0 - 1.0)</label>
+                        <input type="number" id="threshold" value="0.1" step="0.05" min="0" max="1">
+                    </div>
+                </div>
+
+                <button type="submit">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    开始检索
+                </button>
+            </form>
+        </div>
+
+        <div class="loading" id="loading">神经网络火速检索中...</div>
+
+        <div class="results" id="resultsContainer"></div>
+    </div>
+
+    <script>
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const output_dir = document.getElementById('output_dir').value;
+            const site_name = document.getElementById('site_name').value;
+            const query = document.getElementById('query').value;
+            const top_k = parseInt(document.getElementById('top_k').value);
+            const threshold = parseFloat(document.getElementById('threshold').value);
+
+            const resultsContainer = document.getElementById('resultsContainer');
+            const loading = document.getElementById('loading');
+
+            loading.style.display = 'block';
+            resultsContainer.innerHTML = '';
+
+            try {
+                const response = await fetch('http://127.0.0.1:18088/api/v1/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        output_dir,
+                        site_name,
+                        query,
+                        top_k,
+                        threshold
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
+
+                const results = await response.json();
+
+                if (results.length === 0) {
+                    resultsContainer.innerHTML = `
+                        <div class="glass-panel" style="text-align: center; color: var(--text-muted);">
+                            没有找到满足阈值的检索结果
+                        </div>
+                    `;
+                } else {
+                    results.forEach((res, i) => {
+                        const card = document.createElement('div');
+                        card.className = 'result-card';
+                        card.style.animation = `slideUp 0.4s ease-out ${i * 0.1}s backwards`;
+
+                        // 高亮处理
+                        const words = query.trim().split(/\s+/).filter(w => w.trim());
+                        let snippetHtml = res.snippet.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        words.forEach(word => {
+                            if (word.length >= 2 || /[\u4e00-\u9fa5]/.test(word)) { // 处理中文或长词
+                                const regex = new RegExp(`(${word})`, 'gi');
+                                snippetHtml = snippetHtml.replace(regex, '<mark>$1</mark>');
+                            }
+                        });
+
+                        card.innerHTML = `
+                            <div class="result-header">
+                                <h3 class="result-title">${res.title || res.filename}</h3>
+                                <span class="score-badge">Score: ${(res.score * 100).toFixed(1)}%</span>
+                            </div>
+                            <div class="snippet">${snippetHtml}...</div>
+                            <div class="actions">
+                                <a href="${res.html_view_url}" target="_blank" class="btn-link">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                    核心词高亮
+                                </a>
+                                <a href="${res.html_block_view_url}" target="_blank" class="btn-link">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path></svg>
+                                    上下文块覆盖
+                                </a>
+                                <a href="${res.md_download_url}" target="_blank" class="btn-link">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    MD 下载
+                                </a>
+                                <span style="margin-left: auto; color: var(--text-muted); font-size: 0.8rem; display: flex; align-items: center;">
+                                    Lines: ${res.start_line} - ${res.end_line}
+                                </span>
+                            </div>
+                        `;
+                        resultsContainer.appendChild(card);
+                    });
+                }
+            } catch (error) {
+                resultsContainer.innerHTML = `
+                    <div class="glass-panel" style="border-color: #ef4444; background: rgba(239, 68, 68, 0.1);">
+                        <h3 style="color: #ef4444; margin-top: 0;">请求后端失败</h3>
+                        <p style="color: #fca5a5; font-family: monospace;">${error.message}</p>
+                        <p style="font-size: 0.9rem; margin-bottom: 0;">请确保已经启动了基座且暴露了 18088 端口：<br>
+                        <code>xvfb-run -a cargo run --bin headless</code> 
+                        </p>
+                    </div>
+                `;
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+
+</html>

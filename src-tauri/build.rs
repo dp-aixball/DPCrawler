@@ -34,6 +34,7 @@ fn main() {
     // 通过环境变量注入到前端
     println!("cargo:rustc-env=GIT_COMMIT_HASH={}", git_hash);
     println!("cargo:rustc-env=GIT_COMMIT_DATE={}", git_date);
-    
-    tauri_build::build()
+
+    #[cfg(feature = "desktop")]
+    tauri_build::build();
 }

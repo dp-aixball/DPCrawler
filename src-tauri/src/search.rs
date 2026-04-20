@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -20,13 +19,12 @@ pub struct SearchResult {
     // CDN 下载与前端高保真回显链接
     pub md_download_url: Option<String>,
     pub html_view_url: Option<String>,
+    pub html_block_view_url: Option<String>,
 }
 
 impl SearchResult {
     // 为当前请求的端口填充 CDN 链接
-    pub fn inject_urls(&mut self, port: u16, site_name: &str, output_dir: &str) {
-        // self.filename 格式通常是 "站点名/文件名"，例如 "news_site/article"
-        // 或者是文件名。如果已经有斜杠就按其处理，否则加上 site_name
+    pub fn inject_urls(&mut self, port: u16, site_name: &str, output_dir: &str, query: &str) {
         let file_base = if self.filename.contains('/') {
             self.filename
                 .split_once('/')
@@ -39,20 +37,26 @@ impl SearchResult {
 
         let safe_out =
             url::form_urlencoded::byte_serialize(output_dir.as_bytes()).collect::<String>();
+        let safe_query = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
+        let safe_block =
+            url::form_urlencoded::byte_serialize(self.matched_block.as_bytes()).collect::<String>();
 
         self.md_download_url = Some(format!(
             "http://127.0.0.1:{}/files/{}/docs/{}.md?output_dir={}",
             port, site_name, file_base, safe_out
         ));
         self.html_view_url = Some(format!(
-            "http://127.0.0.1:{}/files/{}/html_views/{}.html?output_dir={}",
-            port, site_name, file_base, safe_out
+            "http://127.0.0.1:{}/files/{}/html_views/{}.html?output_dir={}&highlight={}",
+            port, site_name, file_base, safe_out, safe_query
+        ));
+        self.html_block_view_url = Some(format!(
+            "http://127.0.0.1:{}/files/{}/html_views/{}.html?output_dir={}&highlight_block={}",
+            port, site_name, file_base, safe_out, safe_block
         ));
     }
 }
 
 struct Document {
-    id: usize,
     filename: String,
     title: String,
     content: String,
@@ -102,7 +106,6 @@ impl SearchIndex {
         }
 
         let doc = Document {
-            id: self.docs.len(),
             filename,
             title,
             content,
@@ -205,6 +208,7 @@ impl SearchIndex {
                     local_path: doc.local_path.clone(),
                     md_download_url: None, // 将在 API handler 环节动态注入
                     html_view_url: None,   // 将在 API handler 环节动态注入
+                    html_block_view_url: None,
                 }
             })
             .collect()
@@ -401,4 +405,75 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
 
     let block = lines[best_start..=best_end].join("\n");
     (best_start + 1, best_end + 1, block)
+}
+
+pub async fn perform_api_search(
+    output_dir: String,
+    site_name: String,
+    query: String,
+    top_k: usize,
+    threshold: f64,
+) -> Result<Vec<SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut index = SearchIndex::new();
+
+    if let Ok(site_index_json) = crate::fs_utils::read_site_index_core(&output_dir, &site_name) {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&site_index_json) {
+            if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                for (full_name, meta) in tree {
+                    if let Ok(docs_path) = crate::fs_utils::get_processed_file_path_core(
+                        &output_dir,
+                        full_name.as_str(),
+                    ) {
+                        if docs_path.ends_with(".md") {
+                            if let Ok(body) = std::fs::read_to_string(&docs_path) {
+                                let mut text = body.as_str();
+
+                                if text.starts_with("---") {
+                                    if let Some(end_idx) = text[3..].find("\n---") {
+                                        text = &text[3 + end_idx + 4..];
+                                    }
+                                } else if text.starts_with("```yaml") || text.starts_with("```ymal")
+                                {
+                                    if let Some(end_idx) = text[7..].find("\n```") {
+                                        text = &text[7 + end_idx + 4..];
+                                    }
+                                }
+
+                                let title = meta
+                                    .get("title")
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or(full_name.as_str())
+                                    .to_string();
+                                let mut url = String::new();
+                                if let Some(u) = meta.get("source_url").and_then(|u| u.as_str()) {
+                                    url = u.to_string();
+                                }
+
+                                index.add_document(
+                                    full_name.to_string(),
+                                    title,
+                                    text.to_string(),
+                                    url,
+                                    docs_path,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    index.build();
+    let mut results = index.search(&query, top_k);
+
+    if threshold > 0.0 {
+        results.retain(|r| r.score >= threshold);
+    }
+
+    Ok(results)
 }
