@@ -81,6 +81,8 @@ document.addEventListener('DOMContentLoaded', function () {
     totalCount: document.getElementById('totalCount'),
     previewTitle: document.getElementById('previewTitle'),
     previewContent: document.getElementById('previewContent'),
+    previewModeBtn: document.getElementById('previewModeBtn'),
+    rawIframe: document.getElementById('rawIframe'),
     siteList: document.getElementById('siteList'),
     themeSelect: document.getElementById('themeSelect')
   };
@@ -464,14 +466,60 @@ document.addEventListener('DOMContentLoaded', function () {
     return s;
   }
 
+  var currentPreviewMode = 'md';
+  var currentPreviewFilename = '';
+
   function loadPreview(filename, url) {
+    currentPreviewFilename = filename;
     el.previewTitle.textContent = filename;
-    el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
-    var outputDir = el.outputDir.value || './output';
-    invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function (html) {
-      el.previewContent.innerHTML = html;
-    }, function (e) {
-      el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
+    if (el.previewModeBtn) {
+      el.previewModeBtn.style.display = 'inline-block';
+      el.previewModeBtn.textContent = currentPreviewMode === 'md' ? '查看源材料 (Raw)' : '返回 Markdown';
+    }
+
+    if (currentPreviewMode === 'md') {
+      if (el.rawIframe) el.rawIframe.style.display = 'none';
+      el.previewContent.style.display = 'block';
+      el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
+      var outputDir = el.outputDir.value || './output';
+      invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function (html) {
+        el.previewContent.innerHTML = html;
+      }, function (e) {
+        el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
+      });
+    } else {
+      el.previewContent.style.display = 'none';
+      if (el.rawIframe) {
+        el.rawIframe.style.display = 'block';
+        el.rawIframe.removeAttribute('srcdoc');
+        var outputDir = el.outputDir.value || './output';
+        invoke('get_raw_file_info', { outputDir: outputDir, filename: filename }).then(function (info) {
+          if (info.is_text) {
+            el.rawIframe.srcdoc = info.content;
+          } else if (info.is_pdf && info.base64) {
+            el.rawIframe.removeAttribute('srcdoc');
+            el.rawIframe.src = 'data:application/pdf;base64,' + info.base64;
+          } else {
+            var safePath = info.path.replace(/\\/g, '\\\\');
+            var html = '<div style="font-family:sans-serif; text-align:center; padding: 50px;">' +
+              '<h3>\u8be5\u6587\u4ef6\u7c7b\u578b (.' + info.ext + ') \u65e0\u6cd5\u76f4\u63a5\u5185\u5d4c\u9884\u89c8</h3>' +
+              '<p style="color:#666; margin-bottom:20px; font-size:12px; word-break:break-all;">' + info.path + '</p>' +
+              '<button onclick="window.parent.__TAURI__.core.invoke(\'open_url\', {url:\'' + safePath + '\'})" ' +
+              'style="padding:8px 16px; cursor:pointer; background:#3b82f6; color:#fff; border:none; border-radius:4px;">' +
+              '\u8c03\u7528\u7cfb\u7edf\u9ed8\u8ba4\u5e94\u7528\u6253\u5f00</button></div>';
+            el.rawIframe.srcdoc = html;
+          }
+        }, function (e) {
+          el.rawIframe.srcdoc = '<div style="font-family:sans-serif; padding:20px; color:red;">\u627e\u4e0d\u5230\u6e90\u6587\u4ef6\u5bf9\u5e94\u7684\u5907\u4efd\uff1a' + e + '</div>';
+        });
+      }
+    }
+  }
+
+  if (el.previewModeBtn) {
+    el.previewModeBtn.addEventListener('click', function () {
+      currentPreviewMode = currentPreviewMode === 'md' ? 'raw' : 'md';
+      if (currentPreviewFilename) loadPreview(currentPreviewFilename, '');
     });
   }
 

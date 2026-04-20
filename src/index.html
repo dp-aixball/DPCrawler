@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN" style="background:#0f172a">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
     // Apply theme background before any rendering to prevent white flash
-    (function(){
+    (function () {
       var t = localStorage.getItem('dp-theme') || 'auto';
       var light = t === 'light' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches);
       document.documentElement.style.background = light ? '#e2e8f0' : '#0f172a';
@@ -16,9 +17,10 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <div class="app">
-    
+
     <div class="main">
       <aside class="sidebar">
         <div class="sidebar-logo">
@@ -29,7 +31,7 @@
           <div class="section-title">目标 URL</div>
           <input type="text" id="urls" placeholder="输入目标网站URL">
         </div>
-        
+
         <div class="section">
           <div class="section-title">文件扩展名</div>
           <div class="extensions" id="extensions">
@@ -43,14 +45,18 @@
             <label><input type="checkbox" value=".csv" checked> .csv</label>
           </div>
         </div>
-        
+
         <div class="section">
           <div class="section-title">存储设置</div>
           <label>输出目录</label>
           <div class="input-row">
             <input type="text" id="outputDir" value="./output" list="recentOutputDirs">
             <datalist id="recentOutputDirs"></datalist>
-            <button type="button" id="browseDirBtn" class="icon-btn" title="选择目录"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
+            <button type="button" id="browseDirBtn" class="icon-btn" title="选择目录"><svg width="16" height="16"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg></button>
           </div>
           <label>内容格式</label>
           <select id="contentFormat">
@@ -65,7 +71,7 @@
             <option value="light">浅色</option>
           </select>
         </div>
-        
+
         <div class="section">
           <div class="section-title">爬取策略</div>
           <label>请求间隔</label>
@@ -98,7 +104,7 @@
           </div>
         </div>
       </aside>
-      
+
       <main class="content">
         <div class="topbar">
           <h2>爬取控制</h2>
@@ -109,43 +115,67 @@
             <button class="btn btn-danger" id="clearBtn">清空结果</button>
           </div>
         </div>
-        
+
         <div class="progress" id="progressSection">
-          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
           <div class="progress-text" id="progressText">准备就绪</div>
         </div>
-        
+
         <div class="tabs">
           <button class="tab active" data-tab="logs">日志</button>
           <button class="tab" data-tab="files">文件列表</button>
           <button class="tab" data-tab="result">结果</button>
         </div>
-        
+
         <div class="tab-content active" id="logs">
           <div class="log-container" id="logContainer"><span class="log-info">等待开始爬取...</span></div>
         </div>
-        
+
         <div class="tab-content" id="files">
           <div class="files-panel">
-            <div class="file-list" id="fileList"><div class="file-item"><span>暂无文件</span></div></div>
+            <div class="file-list" id="fileList">
+              <div class="file-item"><span>暂无文件</span></div>
+            </div>
             <div class="panel-resizer" id="panelResizer"></div>
             <div class="preview-panel" id="previewPanel">
               <div class="preview-header">
                 <span id="previewTitle">选择文件预览</span>
-
+                <div class="preview-actions" style="margin-left:auto">
+                  <button id="previewModeBtn" class="btn btn-secondary btn-sm"
+                    style="display:none; padding:2px 8px; font-size:12px;">查看源材料 (Raw)</button>
+                </div>
               </div>
               <div class="preview-content" id="previewContent">单击左侧文件即可预览内容</div>
+              <iframe id="rawIframe"
+                style="width:100%; height:calc(100% - 35px); border:none; display:none; background:#fff;"></iframe>
             </div>
           </div>
         </div>
-        
+
         <div class="tab-content" id="result">
           <div class="result-cards">
-            <div class="result-card total"><div class="count" id="totalCount">0</div><div class="label">总计</div></div>
-            <div class="result-card new"><div class="count" id="newCount">0</div><div class="label">新增</div></div>
-            <div class="result-card updated"><div class="count" id="updatedCount">0</div><div class="label">更新</div></div>
-            <div class="result-card unchanged"><div class="count" id="unchangedCount">0</div><div class="label">未变</div></div>
-            <div class="result-card errors"><div class="count" id="errorCount">0</div><div class="label">错误</div></div>
+            <div class="result-card total">
+              <div class="count" id="totalCount">0</div>
+              <div class="label">总计</div>
+            </div>
+            <div class="result-card new">
+              <div class="count" id="newCount">0</div>
+              <div class="label">新增</div>
+            </div>
+            <div class="result-card updated">
+              <div class="count" id="updatedCount">0</div>
+              <div class="label">更新</div>
+            </div>
+            <div class="result-card unchanged">
+              <div class="count" id="unchangedCount">0</div>
+              <div class="label">未变</div>
+            </div>
+            <div class="result-card errors">
+              <div class="count" id="errorCount">0</div>
+              <div class="label">错误</div>
+            </div>
           </div>
         </div>
       </main>
@@ -155,10 +185,12 @@
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">就绪</span>
       </div>
-      <span id="aboutBtn" title="关于" style="cursor:pointer;opacity:0.5;font-size:14px;transition:opacity 0.15s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">ℹ️</span>
+      <span id="aboutBtn" title="关于" style="cursor:pointer;opacity:0.5;font-size:14px;transition:opacity 0.15s"
+        onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">ℹ️</span>
     </footer>
   </div>
-  
+
   <script src="app.js"></script>
 </body>
+
 </html>

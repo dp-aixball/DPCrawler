@@ -858,3 +858,72 @@ pub fn get_absolute_path(path: String) -> Result<String, String> {
         .to_string_lossy()
         .to_string())
 }
+
+#[tauri::command]
+pub fn get_raw_file_info(
+    output_dir: String,
+    filename: String,
+) -> Result<serde_json::Value, String> {
+    let base = crate::fs_utils::resolve_path(&output_dir);
+    let parts: Vec<&str> = filename.splitn(2, '/').collect();
+    let (site_dir, file_base) = if parts.len() == 2 {
+        (parts[0], parts[1])
+    } else {
+        ("", filename.as_str())
+    };
+
+    let raw_dir = if site_dir.is_empty() {
+        base.join("raw")
+    } else {
+        base.join(site_dir).join("raw")
+    };
+
+    if !raw_dir.exists() {
+        return Err("找不到源文件备份录".to_string());
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&raw_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with(file_base) {
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let is_pdf = ext == "pdf";
+                        let is_text = ext == "html"
+                            || ext == "htm"
+                            || ext == "txt"
+                            || ext == "json"
+                            || ext == "xml"
+                            || ext == "csv";
+
+                        let mut content = String::new();
+                        let mut base64_data = String::new();
+
+                        if is_text {
+                            content =
+                                std::fs::read_to_string(&path).unwrap_or_else(|_| "".to_string());
+                        } else if is_pdf {
+                            if let Ok(bytes) = std::fs::read(&path) {
+                                use base64::Engine;
+                                base64_data =
+                                    base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            }
+                        }
+
+                        return Ok(serde_json::json!({
+                            "path": path.to_string_lossy().to_string(),
+                            "ext": ext,
+                            "is_text": is_text,
+                            "is_pdf": is_pdf,
+                            "content": content,
+                            "base64": base64_data
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    Err("源文件已被删除或未备份".to_string())
+}

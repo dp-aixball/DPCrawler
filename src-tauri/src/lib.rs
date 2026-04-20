@@ -40,7 +40,8 @@ pub fn run() {
             commands::read_site_index,
             commands::force_quit,
             commands::get_app_version,
-            commands::get_absolute_path
+            commands::get_absolute_path,
+            commands::get_raw_file_info
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
