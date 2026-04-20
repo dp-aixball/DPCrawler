@@ -388,6 +388,16 @@ class WebCrawler:
 
             if self.config.recursive and depth < self.config.max_depth:
                 sub_links = self.extract_links(soup, url)
+                
+            # Hub page heuristic: If total characters inside <a> tags outweigh non-link text,
+            # this is likely a navigation/index page. We skip saving to prevent polluting RAG,
+            # but preserve `sub_links` for further traversal.
+            link_text_len = sum(len(a.get_text(strip=True)) for a in soup.find_all('a'))
+            total_text_len = len(soup.body.get_text(strip=True)) if soup.body else len(soup.get_text(strip=True))
+            if link_text_len > (total_text_len - link_text_len):
+                is_hub_page = True
+            else:
+                is_hub_page = False
 
         elif content_type in self.BINARY_CONTENT_TYPES or url_ext in self.BINARY_EXTENSIONS:
             # Determine file extension for temp file
@@ -471,12 +481,15 @@ class WebCrawler:
             print(f"  -> Skipped (unsupported: {content_type})")
             return False
 
-        if content is None:
+        if content is None and not sub_links:
             return False
 
-        # Content year filter: if content has year patterns and max < threshold, skip saving but still crawl sub-links
-        content_skip = False
-        if min_year:
+        # Content year filter and Hub page filter
+        content_skip = locals().get('is_hub_page', False)
+        if content_skip:
+            print(f"  -> [skip] Hub page detected (links ratio high): {url}")
+            
+        if min_year and not content_skip:
             content_max_year = self.extract_max_year(content)
             if content_max_year > 0 and content_max_year < min_year:
                 print(f"  -> [skip] Content year {content_max_year} < {min_year}: {url}")
