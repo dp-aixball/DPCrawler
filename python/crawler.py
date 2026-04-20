@@ -28,6 +28,7 @@ except ImportError:
 
 try:
     import pymupdf4llm
+    from pdf_parser import extract_gov_pdf_to_markdown
     PYMUPDF4LLM_AVAILABLE = True
 except ImportError:
     PYMUPDF4LLM_AVAILABLE = False
@@ -401,7 +402,7 @@ class WebCrawler:
                         tmp_path = tmp.name
                     with ThreadPoolExecutor(max_workers=1) as conv_exec:
                         if file_ext == '.pdf' and PYMUPDF4LLM_AVAILABLE:
-                            content = conv_exec.submit(pymupdf4llm.to_markdown, tmp_path).result(timeout=120)
+                            content = conv_exec.submit(extract_gov_pdf_to_markdown, tmp_path).result(timeout=120)
                         elif MARKITDOWN_AVAILABLE:
                             content = conv_exec.submit(_markitdown.convert, tmp_path).result(timeout=60)
                             content = content.text_content
@@ -814,7 +815,7 @@ class WebCrawler:
                     # Binary files: use Advanced Parser (with fallback)
                     try:
                         if fpath.lower().endswith('.pdf') and PYMUPDF4LLM_AVAILABLE:
-                            content = pymupdf4llm.to_markdown(fpath)
+                            content = extract_gov_pdf_to_markdown(fpath)
                         elif MARKITDOWN_AVAILABLE:
                             result = _markitdown.convert(fpath)
                             content = result.text_content

@@ -643,8 +643,79 @@ textarea:disabled {
   border-collapse: collapse;
   width: 100%;
   margin: 8px 0;
-  font-size: 13px;
 }
+
+/* --- Government Document Markdown Aesthetic --- */
+.gov-doc {
+  font-family: "FangSong", "STFangsong", serif;
+  /* 仿宋正文 */
+  line-height: 2.0;
+  color: #1a1a1a;
+  padding: 10px 20px;
+}
+
+.gov-doc h1 {
+  font-family: "FZXiaoBiaoSong-B05S", "SimSun", serif;
+  /* 大标题使用小标宋或宋体加粗 */
+  text-align: center;
+  font-size: 2.2em;
+  font-weight: bold;
+  color: #000;
+  margin: 1.5em 0 1em;
+}
+
+.gov-doc h2 {
+  font-family: "SimHei", "STHeiti", sans-serif;
+  /* 一级小标题使用黑体 */
+  font-size: 1.6em;
+  font-weight: bold;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  color: #222;
+}
+
+.gov-doc h3 {
+  font-family: "KaiTi", "STKaiti", serif;
+  /* 二级小标题使用楷体 */
+  font-size: 1.3em;
+  font-weight: bold;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  color: #333;
+}
+
+.gov-doc p,
+.gov-doc div:not(.api-anchor) {
+  text-indent: 2em;
+  /* 严格执行的公文双字符首行缩进 */
+  font-size: 1.2em;
+  margin: 0.5em 0;
+  text-align: justify;
+}
+
+.gov-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 2em 0;
+  font-family: "SimSun", serif;
+  /* 报表必须使用宋体 */
+  font-size: 1.1em;
+  background: white;
+}
+
+.gov-doc th,
+.gov-doc td {
+  border: 1px solid #444;
+  padding: 10px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.gov-doc th {
+  background-color: #f7f7f7;
+  font-weight: bold;
+}
+
 
 .preview-content th,
 .preview-content td {
