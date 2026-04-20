@@ -777,32 +777,6 @@ fn render_marked_markdown(content: &str, start_line: usize, end_line: usize) -> 
 }
 
 #[tauri::command]
-pub fn render_marked_html(content: &str, start_line: usize, end_line: usize) -> String {
-    let mut lines: Vec<&str> = content.lines().collect();
-
-    if start_line < lines.len() {
-        lines.insert(
-            start_line,
-            "<span id=\"api-block-start\" style=\"display:none;\"></span>",
-        );
-    }
-
-    let actual_end = if end_line + 1 < lines.len() {
-        end_line + 2
-    } else {
-        lines.len()
-    };
-    if actual_end <= lines.len() {
-        lines.insert(
-            actual_end,
-            "<span id=\"api-block-end\" style=\"display:none;\"></span>",
-        );
-    }
-
-    lines.join("\n")
-}
-
-#[tauri::command]
 pub fn preview_api_block(
     output_dir: String,
     filename: String,
@@ -830,14 +804,14 @@ pub fn preview_api_block(
     if html_path.exists() {
         let content = std::fs::read_to_string(&html_path)
             .map_err(|e| format!("Failed to read file: {}", e))?;
-        return Ok(render_marked_html(&content, start_line, end_line));
+        return Ok(content);
     }
 
     let legacy_path = base.join(format!("{}{}", filename, ext));
     if legacy_path.exists() {
         let content = std::fs::read_to_string(&legacy_path)
             .map_err(|e| format!("Failed to read file: {}", e))?;
-        return Ok(render_marked_html(&content, start_line, end_line));
+        return Ok(content);
     }
 
     Err(format!("HTML file not found: {}", filename))
@@ -1187,14 +1161,20 @@ pub async fn search_site_content(
                     if let Ok(docs_path) =
                         get_processed_file_path(output_dir.clone(), full_name.to_string())
                     {
-                        // Deriving html_views path by replacing /docs/ with /html_views/ and changing extension to .html
-                        let html_path = docs_path
-                            .replace("/docs/", "/html_views/")
-                            .replace(".md", ".html");
-
-                        if std::path::Path::new(&html_path).exists() {
-                            if let Ok(body) = std::fs::read_to_string(&html_path) {
+                        if docs_path.ends_with(".md") {
+                            if let Ok(body) = std::fs::read_to_string(&docs_path) {
                                 let mut text = body.as_str();
+
+                                if text.starts_with("---") {
+                                    if let Some(end_idx) = text[3..].find("\n---") {
+                                        text = &text[3 + end_idx + 4..];
+                                    }
+                                } else if text.starts_with("```yaml") || text.starts_with("```ymal")
+                                {
+                                    if let Some(end_idx) = text[7..].find("\n```") {
+                                        text = &text[7 + end_idx + 4..];
+                                    }
+                                }
 
                                 let title = meta
                                     .get("title")
@@ -1211,7 +1191,7 @@ pub async fn search_site_content(
                                     title,
                                     text.to_string(),
                                     url,
-                                    html_path,
+                                    docs_path,
                                 );
                             }
                         }
@@ -1248,13 +1228,20 @@ pub async fn api_search(
                     if let Ok(docs_path) =
                         get_processed_file_path(output_dir.clone(), full_name.to_string())
                     {
-                        let html_path = docs_path
-                            .replace("/docs/", "/html_views/")
-                            .replace(".md", ".html");
-
-                        if std::path::Path::new(&html_path).exists() {
-                            if let Ok(body) = std::fs::read_to_string(&html_path) {
+                        if docs_path.ends_with(".md") {
+                            if let Ok(body) = std::fs::read_to_string(&docs_path) {
                                 let mut text = body.as_str();
+
+                                if text.starts_with("---") {
+                                    if let Some(end_idx) = text[3..].find("\n---") {
+                                        text = &text[3 + end_idx + 4..];
+                                    }
+                                } else if text.starts_with("```yaml") || text.starts_with("```ymal")
+                                {
+                                    if let Some(end_idx) = text[7..].find("\n```") {
+                                        text = &text[7 + end_idx + 4..];
+                                    }
+                                }
 
                                 let title = meta
                                     .get("title")
@@ -1271,7 +1258,7 @@ pub async fn api_search(
                                     title,
                                     text.to_string(),
                                     url,
-                                    html_path,
+                                    docs_path,
                                 );
                             }
                         }

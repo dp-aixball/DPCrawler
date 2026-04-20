@@ -2,6 +2,7 @@ pub mod commands;
 pub mod fs_utils;
 pub mod process;
 pub mod search;
+pub mod server;
 use process::disable_webkit_cache;
 use process::CRAWLER_PID;
 use std::sync::atomic::Ordering;
@@ -53,6 +54,10 @@ pub fn run() {
             commands::preview_api_block
         ])
         .setup(|app| {
+            tauri::async_runtime::spawn(async move {
+                server::run_server(18088).await;
+            });
+
             let window = app.get_webview_window("main").unwrap();
 
             let w = window.clone();

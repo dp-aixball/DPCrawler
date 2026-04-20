@@ -159,10 +159,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
       searchTimeout = setTimeout(function () {
         el.fileList.innerHTML = '<div class="file-item"><span>搜索中 (' + activeSite + ')...</span></div>';
-        invoke('search_site_content', { outputDir: outputDir, siteName: activeSite, query: query })
+
+        var outDir = el.outputDir.value || './output';
+        fetch('http://127.0.0.1:18088/api/v1/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            output_dir: outDir,
+            site_name: activeSite,
+            query: query,
+            top_k: 50,
+            threshold: 0.0
+          })
+        })
+          .then(function (res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+          })
           .then(function (results) {
             renderSearchResults(results);
-          }).catch(function (err) {
+          })
+          .catch(function (err) {
             el.fileList.innerHTML = '<div class="file-item" style="color:red"><span>搜索失败: ' + err + '</span></div>';
             log('搜索出错: ' + err, 'error');
           });
@@ -212,6 +229,9 @@ document.addEventListener('DOMContentLoaded', function () {
           var items = el.fileList.querySelectorAll('.file-item');
           for (var j = 0; j < items.length; j++) items[j].classList.remove('selected');
           element.classList.add('selected');
+
+          // Force active mode to html so that the search results render high-fidelity RAG sources natively
+          currentPreviewMode = 'html';
           loadPreview(res.filename, res.url);
         });
       })(r, div);
@@ -673,14 +693,23 @@ document.addEventListener('DOMContentLoaded', function () {
       if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
       el.previewContent.style.display = 'block';
       el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
-      var outputDir = el.outputDir.value || './output';
-      invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function (html) {
-        el.previewContent.innerHTML = html;
+
+      var file_base = filename;
+      if (file_base.indexOf('/') !== -1) { file_base = file_base.split('/')[1]; }
+      var outDir = el.outputDir.value || './output';
+      var params = '?output_dir=' + encodeURIComponent(outDir);
+      var mdUrl = 'http://127.0.0.1:18088/files/' + (activeSite || '') + '/docs/' + file_base + '.md' + params;
+
+      fetch(mdUrl).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.text();
+      }).then(function (text) {
+        el.previewContent.innerHTML = simpleMarkdown(text);
         if (typeof currentSearchQuery !== 'undefined' && currentSearchQuery) {
           highlightDOM(el.previewContent, currentSearchQuery);
         }
-      }, function (e) {
-        el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
+      }).catch(function (e) {
+        el.previewContent.textContent = '读取失败 (REST API): ' + e;
       });
     } else if (currentPreviewMode === 'html') {
       if (el.rawIframe) el.rawIframe.style.display = 'block';
@@ -688,14 +717,14 @@ document.addEventListener('DOMContentLoaded', function () {
       if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
       el.previewContent.style.display = 'none';
 
-      var outputDir = el.outputDir.value || './output';
-      invoke('read_html_view', { outputDir: outputDir, filename: filename }).then(function (html) {
-        el.rawIframe.srcdoc = html;
-      }).catch(function (e) {
-        el.rawIframe.style.display = 'none';
-        el.previewContent.style.display = 'block';
-        el.previewContent.textContent = '无法加载原版高保真视图: ' + e;
-      });
+      var file_base = filename;
+      if (file_base.indexOf('/') !== -1) { file_base = file_base.split('/')[1]; }
+      var outDir = el.outputDir.value || './output';
+      var params = '?output_dir=' + encodeURIComponent(outDir);
+      var htmlUrl = 'http://127.0.0.1:18088/files/' + (activeSite || '') + '/html_views/' + file_base + '.html' + params;
+
+      el.rawIframe.removeAttribute('srcdoc');
+      el.rawIframe.src = htmlUrl;
     } else if (currentPreviewMode === 'meta') {
       if (el.rawIframe) el.rawIframe.style.display = 'none';
       if (el.docxContainer) el.docxContainer.style.display = 'none';
@@ -1676,7 +1705,7 @@ document.addEventListener('DOMContentLoaded', function () {
         header.appendChild(score);
 
         var linesInfo = document.createElement('div');
-        linesInfo.textContent = '📍 连续命中行区间: 第 ' + res.start_line + ' 行 ~ 第 ' + res.end_line + ' 行';
+        linesInfo.textContent = '📍 命中HTML原装源文件: 第 ' + res.start_line + ' 行 ~ 第 ' + res.end_line + ' 行';
         linesInfo.style.fontSize = '12px';
         linesInfo.style.color = 'var(--brand-primary)';
         linesInfo.style.marginBottom = '6px';
@@ -1684,6 +1713,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var snippet = document.createElement('div');
         snippet.textContent = res.matched_block.substring(0, 150) + (res.matched_block.length > 150 ? '...' : '');
         snippet.style.fontSize = '11px';
+        snippet.style.fontFamily = 'monospace';
         snippet.style.color = 'var(--text-muted)';
         snippet.style.lineHeight = '1.4';
         snippet.style.display = '-webkit-box';
@@ -1722,53 +1752,99 @@ document.addEventListener('DOMContentLoaded', function () {
       startLine: res.start_line,
       endLine: res.end_line
     }).then(function (html) {
-      apiPreviewContent.innerHTML = html;
+      apiPreviewContent.innerHTML = '';
+      var apiIframe = document.createElement('iframe');
+      apiIframe.style.width = '100%';
+      apiIframe.style.height = '100%';
+      apiIframe.style.border = 'none';
+      apiIframe.style.background = '#fff';
+      apiIframe.srcdoc = html;
+      apiIframe.onload = function () {
+        try {
+          var iframeDoc = apiIframe.contentDocument || apiIframe.contentWindow.document;
 
-      // Now we find the anchors and highlight everything in between!
-      var startAnchor = apiPreviewContent.querySelector('#api-block-start');
-      var endAnchor = apiPreviewContent.querySelector('#api-block-end');
+          var cleanMd = res.matched_block.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+          if (cleanMd.length < 5) return;
 
-      if (startAnchor && endAnchor) {
-        var range = document.createRange();
-        range.setStartAfter(startAnchor);
-        range.setEndBefore(endAnchor);
+          var prefix = cleanMd.substring(0, Math.min(20, cleanMd.length));
+          var suffix = cleanMd.substring(Math.max(0, cleanMd.length - 20));
 
-        var treeWalker = document.createTreeWalker(
-          range.commonAncestorContainer,
-          NodeFilter.SHOW_TEXT,
-          {
-            acceptNode: function (node) {
-              if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
-              if (range.intersectsNode(node)) return NodeFilter.FILTER_ACCEPT;
-              return NodeFilter.FILTER_REJECT;
+          var treeWalker = iframeDoc.createTreeWalker(
+            iframeDoc.body,
+            NodeFilter.SHOW_TEXT,
+            {
+              acceptNode: function (node) {
+                if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            }
+          );
+
+          var nodes = [];
+          var fullText = "";
+          var currentNode;
+          while ((currentNode = treeWalker.nextNode())) {
+            var val = currentNode.nodeValue.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+            if (val.length === 0) continue;
+            nodes.push({ node: currentNode, start: fullText.length, end: fullText.length + val.length });
+            fullText += val;
+          }
+
+          var startIndex = fullText.indexOf(prefix);
+          var endIndex = fullText.indexOf(suffix, startIndex);
+          endIndex = endIndex !== -1 ? endIndex + suffix.length : -1;
+
+          if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {
+            var startAnchor = null;
+            var endAnchor = null;
+
+            for (var i = 0; i < nodes.length; i++) {
+              if (!startAnchor && nodes[i].end > startIndex) startAnchor = nodes[i].node;
+              if (nodes[i].start < endIndex) endAnchor = nodes[i].node;
+            }
+
+            if (startAnchor && endAnchor) {
+              var range = iframeDoc.createRange();
+              range.setStartBefore(startAnchor);
+              range.setEndAfter(endAnchor);
+
+              var highlightWalker = iframeDoc.createTreeWalker(
+                range.commonAncestorContainer,
+                NodeFilter.SHOW_TEXT,
+                {
+                  acceptNode: function (node) {
+                    if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
+                    if (range.intersectsNode(node)) return NodeFilter.FILTER_ACCEPT;
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                }
+              );
+
+              var nodesToWrap = [];
+              var n;
+              while ((n = highlightWalker.nextNode())) nodesToWrap.push(n);
+
+              nodesToWrap.forEach(function (node) {
+                var span = iframeDoc.createElement('span');
+                span.className = 'api-sandbox-highlight';
+                span.style.backgroundColor = 'rgba(250, 204, 21, 0.4)';
+                span.style.color = '#000';
+                node.parentNode.insertBefore(span, node);
+                span.appendChild(node);
+              });
+
+              setTimeout(function () {
+                if (startAnchor.parentNode) {
+                  startAnchor.parentNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }, 100);
             }
           }
-        );
-
-        var nodesToWrap = [];
-        var currentNode;
-        while ((currentNode = treeWalker.nextNode())) {
-          nodesToWrap.push(currentNode);
+        } catch (e) {
+          console.error('API Iframe bounding box failed:', e);
         }
-
-        var hasWrapped = nodesToWrap.length > 0;
-        nodesToWrap.forEach(function (n) {
-          var span = document.createElement('span');
-          span.className = 'api-sandbox-highlight';
-          span.style.backgroundColor = 'rgba(250, 204, 21, 0.3)';
-          span.style.borderBottom = '2px solid #f59e0b';
-          span.style.color = '#000';
-          n.parentNode.insertBefore(span, n);
-          span.appendChild(n);
-        });
-
-        if (hasWrapped) {
-          setTimeout(function () {
-            startAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
-        }
-      }
-
+      };
+      apiPreviewContent.appendChild(apiIframe);
     }).catch(function (e) {
       apiPreviewContent.innerHTML = '<div style="color:#ef4444;padding:10px;">读取正文失败: ' + e + '</div>';
     });

@@ -17,6 +17,38 @@ pub struct SearchResult {
     pub end_line: usize,
     pub matched_block: String,
     pub local_path: String,
+    // CDN 下载与前端高保真回显链接
+    pub md_download_url: Option<String>,
+    pub html_view_url: Option<String>,
+}
+
+impl SearchResult {
+    // 为当前请求的端口填充 CDN 链接
+    pub fn inject_urls(&mut self, port: u16, site_name: &str, output_dir: &str) {
+        // self.filename 格式通常是 "站点名/文件名"，例如 "news_site/article"
+        // 或者是文件名。如果已经有斜杠就按其处理，否则加上 site_name
+        let file_base = if self.filename.contains('/') {
+            self.filename
+                .split_once('/')
+                .map(|(_, name)| name)
+                .unwrap_or(&self.filename)
+                .to_string()
+        } else {
+            self.filename.clone()
+        };
+
+        let safe_out =
+            url::form_urlencoded::byte_serialize(output_dir.as_bytes()).collect::<String>();
+
+        self.md_download_url = Some(format!(
+            "http://127.0.0.1:{}/files/{}/docs/{}.md?output_dir={}",
+            port, site_name, file_base, safe_out
+        ));
+        self.html_view_url = Some(format!(
+            "http://127.0.0.1:{}/files/{}/html_views/{}.html?output_dir={}",
+            port, site_name, file_base, safe_out
+        ));
+    }
 }
 
 struct Document {
@@ -154,6 +186,8 @@ impl SearchIndex {
                     end_line,
                     matched_block,
                     local_path: doc.local_path.clone(),
+                    md_download_url: None, // 将在 API handler 环节动态注入
+                    html_view_url: None,   // 将在 API handler 环节动态注入
                 }
             })
             .collect()
