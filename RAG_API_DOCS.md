@@ -33,14 +33,16 @@ Content-Type: `application/json`
     "title": "2026年同等学力人员申请硕士学位报考指南", 
     "score": 45, 
     "snippet": "2026 年同等学力人员申请硕士学位外国语水平...报名流程见附件。", 
-    "source_url": "https://tdxl.neea.edu.cn/notice/1", // 互联网上的原始出处
+    "url": "https://tdxl.neea.edu.cn/notice/1", // 互联网上的原始出处
     "start_line": 24, 
     "end_line": 28, 
     "matched_block": "（二）考试报名\n符合报考资格的考生须于 3 月 16 日...", // 【核心投喂物】被动态滑窗提取出的连续上下文切片，直接作为 RAG 知识送入远程 LLM。
+    "local_path": "/absolute/path/to/output/...md", // 物理机上的原始绝对位置
     
-    // 【跨服核心】通过 DPCrawler 内置静态服务器（或 Nginx）暴露的远程访问链接
-    "md_download_url": "http://dpcrawler-host:8080/files/SiteA/docs/2026年报名简章.md", // LLM 用来即时拉取万字全文的接口
-    "html_view_url": "http://dpcrawler-host:8080/files/SiteA/html_views/2026年报名简章.html" // 前端 UI 直接塞入 Iframe 画布的高保真远端视觉链接
+    // 【跨服核心】通过 DPCrawler 内置静态服务器（或 Nginx）暴露的相对路径链接
+    "md_download_url": "/files/SiteA/docs/2026年报名简章.md?output_dir=...", // LLM 用来即时拉取万字全文的接口
+    "html_view_url": "/files/SiteA/html_views/2026年报名简章.html?output_dir=...&highlight=...", // 前端 UI 直接塞入 Iframe 画布的高保真远端视觉链接
+    "html_block_view_url": "/files/SiteA/html_views/2026年报名简章.html?output_dir=...&highlight_block=..." // 锚定具体块片段的高亮链接
   }
 ]
 ```
