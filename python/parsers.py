@@ -759,6 +759,16 @@ def extract_title(soup: BeautifulSoup) -> str:
 
 def extract_main_html(raw_html: str, title: str = "") -> str:
     """Extract semantic main content HTML from raw webpage DOM"""
+    # 优先尝试使用专业的 Readability 引擎剥离网页模板噪声（如面包屑、边栏、版权页）
+    try:
+        from readability import Document
+        doc = Document(raw_html)
+        clean_html = doc.summary(html_partial=True)
+        if clean_html and len(clean_html) > 100:
+            return f"<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body {{ font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}\n  img {{ max-width: 100%; height: auto; }}\n  table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}\n  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}\n</style>\n<title>{title}</title>\n</head>\n<body>\n{clean_html}\n</body>\n</html>"
+    except Exception:
+        pass
+
     soup = BeautifulSoup(raw_html, "html.parser")
     
     # Remove unwanted tags universally
