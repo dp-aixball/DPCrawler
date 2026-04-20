@@ -13,6 +13,12 @@ except ImportError:
     HTML2TEXT_AVAILABLE = False
 
 try:
+    import trafilatura
+    TRAFILATURA_AVAILABLE = True
+except ImportError:
+    TRAFILATURA_AVAILABLE = False
+
+try:
     import pdfplumber
 except ImportError:
     pdfplumber = None
@@ -239,6 +245,52 @@ def html_to_markdown(html: str, base_url: str = "") -> str:
         result_md = result_md.replace(placeholder, "\n\n" + md_table + "\n\n")
         
     return result_md
+
+
+def universal_html_extract(html: str, base_url: str = "") -> dict:
+    """
+    Extract main content and metadata using Trafilatura for universal support.
+    Returns a dict: {"content": str, "metadata": dict}
+    Will fallback to custom html_to_markdown if Trafilatura fails or returns too little.
+    """
+    fallback_result = None
+
+    def _do_fallback():
+        content = html_to_markdown(html, base_url)
+        content = extract_body_content(content)
+        return {"content": content, "metadata": {}}
+
+    if not TRAFILATURA_AVAILABLE:
+        return _do_fallback()
+
+    try:
+        # Pre-convert complex tables manually to preserve rowspan/colspan,
+        # then let trafilatura handle the rest. Trafilatura is good but our table parser handles edge-cases.
+        html_processed, table_placeholders = _convert_tables_to_markdown(html)
+        
+        md_content = trafilatura.extract(html_processed, url=base_url, output_format="markdown", include_tables=True, include_images=False, include_comments=False)
+        metadata = trafilatura.extract_metadata(html_processed, default_url=base_url)
+        
+        if md_content and len(md_content.strip()) > 50:
+            # Restore tables
+            for placeholder, md_table in table_placeholders.items():
+                md_content = md_content.replace(placeholder, "\n\n" + md_table + "\n\n")
+
+            meta_dict = {}
+            if hasattr(metadata, 'as_dict'):
+                meta_dict = metadata.as_dict()
+            elif isinstance(metadata, dict):
+                meta_dict = metadata
+            
+            # Clean up metadata (remove Nones)
+            clean_meta = {k: v for k, v in meta_dict.items() if v}
+            
+            return {"content": md_content, "metadata": clean_meta}
+        else:
+            return _do_fallback()
+    except Exception as e:
+        print(f"  -> Trafilatura parsing error: {e}")
+        return _do_fallback()
 
 
 def doc_to_markdown(data: bytes) -> str:

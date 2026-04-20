@@ -1,6 +1,6 @@
-pub mod process;
-pub mod fs_utils;
 pub mod commands;
+pub mod fs_utils;
+pub mod process;
 use process::disable_webkit_cache;
 use process::CRAWLER_PID;
 use std::sync::atomic::Ordering;
@@ -39,11 +39,11 @@ pub fn run() {
             commands::read_site_config,
             commands::read_site_index,
             commands::force_quit,
-            commands::get_app_version
+            commands::get_app_version,
+            commands::get_absolute_path
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
-
 
             let w = window.clone();
             window.on_window_event(move |event| {
@@ -59,18 +59,16 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            match event {
-                tauri::RunEvent::ExitRequested { api, .. } => {
-                    let pid = CRAWLER_PID.load(Ordering::SeqCst);
-                    if pid > 0 {
-                        api.prevent_exit();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.emit("confirm-exit", ());
-                        }
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                let pid = CRAWLER_PID.load(Ordering::SeqCst);
+                if pid > 0 {
+                    api.prevent_exit();
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.emit("confirm-exit", ());
                     }
                 }
-                _ => {}
             }
+            _ => {}
         });
 }

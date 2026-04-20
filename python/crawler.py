@@ -360,8 +360,18 @@ class WebCrawler:
             soup = BeautifulSoup(response.text, "html.parser")
             title = parsers.extract_title(soup)
             raw_html = response.text
-            raw_content = parsers.html_to_markdown(response.text, url)
-            content = parsers.extract_body_content(raw_content)
+            
+            extracted = parsers.universal_html_extract(response.text, url)
+            content = extracted["content"]
+            metadata = extracted.get("metadata", {})
+            if metadata.get("title"):
+                title = metadata["title"]
+                
+            if metadata:
+                import yaml
+                meta_yml = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
+                content = f"---\n{meta_yml}\n---\n\n{content}"
+
             if self.config.recursive and depth < self.config.max_depth:
                 sub_links = self.extract_links(soup, url)
 
@@ -455,7 +465,9 @@ class WebCrawler:
                     source_url=url,
                     title=title,
                     content_type="text/markdown",
-                    raw_html=raw_html
+                    raw_html=raw_html,
+                    raw_bytes=response.content,
+                    original_ext=url_ext if url_ext else ".html"
                 )
 
                 if status == "new":
@@ -755,8 +767,18 @@ class WebCrawler:
                         html_text = f.read()
                     soup = BeautifulSoup(html_text, 'html.parser')
                     title = parsers.extract_title(soup)
-                    raw_content = parsers.html_to_markdown(html_text, source_url)
-                    content = parsers.extract_body_content(raw_content)
+                    
+                    extracted = parsers.universal_html_extract(html_text, source_url)
+                    content = extracted["content"]
+                    metadata = extracted.get("metadata", {})
+                    if metadata.get("title"):
+                        title = metadata["title"]
+                        
+                    if metadata:
+                        import yaml
+                        meta_yml = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
+                        content = f"---\n{meta_yml}\n---\n\n{content}"
+
 
                 elif ext in all_plain_exts - {'.html', '.htm'}:
                     # Plain text files

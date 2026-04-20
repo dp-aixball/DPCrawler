@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
-use tauri::{Emitter, Manager};
+use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
+use tauri::{Emitter, Manager};
 
+use crate::fs_utils::{data_dir, dev_project_root, is_dev_mode, resolve_path};
+use crate::process::{is_pid_alive, kill_pid, CRAWLER_PID};
 use std::path::PathBuf;
-use crate::process::{CRAWLER_PID, kill_pid, is_pid_alive};
-use crate::fs_utils::{resolve_path, data_dir, dev_project_root, is_dev_mode};
 
 /// Find the crawler executable.
 
@@ -49,7 +49,11 @@ pub fn find_crawler() -> Result<(String, Vec<String>), String> {
             let python_cmd = if venv_python.exists() {
                 venv_python.to_string_lossy().to_string()
             } else {
-                if cfg!(windows) { "python.exe".to_string() } else { "python3".to_string() }
+                if cfg!(windows) {
+                    "python.exe".to_string()
+                } else {
+                    "python3".to_string()
+                }
             };
             return Ok((python_cmd, vec![crawler_file.to_string_lossy().to_string()]));
         }
@@ -58,7 +62,11 @@ pub fn find_crawler() -> Result<(String, Vec<String>), String> {
     // Installed: check next to our own executable (e.g. /usr/bin/crawler or C:\Program Files\...\crawler.exe)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            let sidecar_name = if cfg!(windows) { "crawler.exe" } else { "crawler" };
+            let sidecar_name = if cfg!(windows) {
+                "crawler.exe"
+            } else {
+                "crawler"
+            };
             let sidecar = exe_dir.join(sidecar_name);
             if sidecar.exists() && sidecar.is_file() {
                 return Ok((sidecar.to_string_lossy().to_string(), vec![]));
@@ -79,7 +87,8 @@ pub fn find_crawler() -> Result<(String, Vec<String>), String> {
                         continue;
                     }
                     let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                    if size > 1000 {  // skip placeholder files
+                    if size > 1000 {
+                        // skip placeholder files
                         return Ok((p.to_string_lossy().to_string(), vec![]));
                     }
                 }
@@ -91,7 +100,10 @@ pub fn find_crawler() -> Result<(String, Vec<String>), String> {
 }
 
 #[tauri::command]
-pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<CrawlResult, String> {
+pub async fn run_crawler(
+    app: tauri::AppHandle,
+    config_path: String,
+) -> Result<CrawlResult, String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<CrawlResult, String>>();
 
     // Run crawler in a real OS thread so app.emit works immediately
@@ -107,7 +119,8 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
             args.push(abs_config.to_string_lossy().to_string());
 
             let mut cmd_obj = Command::new(&cmd);
-            cmd_obj.current_dir(&work_dir)
+            cmd_obj
+                .current_dir(&work_dir)
                 .args(&args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -119,7 +132,8 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
                 cmd_obj.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
 
-            let mut child = cmd_obj.spawn()
+            let mut child = cmd_obj
+                .spawn()
                 .map_err(|e| format!("Failed to run crawler: {} (cmd: {})", e, cmd))?;
 
             CRAWLER_PID.store(child.id(), Ordering::SeqCst);
@@ -165,15 +179,30 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
                     }
 
                     if line.contains("-> New:") {
-                        file_name = line.split("-> New:").last().unwrap_or("").trim().to_string();
+                        file_name = line
+                            .split("-> New:")
+                            .last()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         status = "new".to_string();
                         current_url = last_url.clone();
                     } else if line.contains("-> Updated:") {
-                        file_name = line.split("-> Updated:").last().unwrap_or("").trim().to_string();
+                        file_name = line
+                            .split("-> Updated:")
+                            .last()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         status = "updated".to_string();
                         current_url = last_url.clone();
                     } else if line.contains("-> Unchanged:") {
-                        file_name = line.split("-> Unchanged:").last().unwrap_or("").trim().to_string();
+                        file_name = line
+                            .split("-> Unchanged:")
+                            .last()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         status = "unchanged".to_string();
                         current_url = last_url.clone();
                     } else if line.contains("-> Error:") {
@@ -181,12 +210,15 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
                     }
 
                     // Non-blocking emit (ignore errors to avoid blocking stdout read)
-                    let _ = app_clone.emit("crawl-progress", CrawlProgress {
-                        line: line.clone(),
-                        file_name,
-                        status,
-                        url: current_url,
-                    });
+                    let _ = app_clone.emit(
+                        "crawl-progress",
+                        CrawlProgress {
+                            line: line.clone(),
+                            file_name,
+                            status,
+                            url: current_url,
+                        },
+                    );
                 }
 
                 result_json
@@ -196,8 +228,12 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
             CRAWLER_PID.store(0, Ordering::SeqCst);
 
             // Get result from stdout reading thread
-            let result_json = stdout_thread.join()
-                .map_err(|e| format!("Stdout reader thread panicked: {:?}", e.downcast_ref::<&str>().unwrap_or(&"unknown")))?;
+            let result_json = stdout_thread.join().map_err(|e| {
+                format!(
+                    "Stdout reader thread panicked: {:?}",
+                    e.downcast_ref::<&str>().unwrap_or(&"unknown")
+                )
+            })?;
 
             if result_json.is_empty() {
                 return Err("No result from crawler".to_string());
@@ -211,9 +247,9 @@ pub async fn run_crawler(app: tauri::AppHandle, config_path: String) -> Result<C
     });
 
     // Await result from the thread without blocking the main thread
-    tokio::task::spawn_blocking(move || {
-        rx.recv().map_err(|e| format!("Channel error: {}", e))?
-    }).await.map_err(|e| format!("Task error: {}", e))?
+    tokio::task::spawn_blocking(move || rx.recv().map_err(|e| format!("Channel error: {}", e))?)
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
@@ -231,7 +267,8 @@ pub async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result
             args.push("--pre-crawl".to_string());
 
             let mut cmd_obj = Command::new(&cmd);
-            cmd_obj.current_dir(&work_dir)
+            cmd_obj
+                .current_dir(&work_dir)
                 .args(&args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -243,7 +280,8 @@ pub async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result
                 cmd_obj.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
 
-            let mut child = cmd_obj.spawn()
+            let mut child = cmd_obj
+                .spawn()
                 .map_err(|e| format!("Failed to run pre-crawl: {} (cmd: {})", e, cmd))?;
 
             CRAWLER_PID.store(child.id(), Ordering::SeqCst);
@@ -274,10 +312,20 @@ pub async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result
                     let is_doc = line.contains("(doc)");
 
                     if let Some(d) = line.split("depth=").nth(1) {
-                        depth = d.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                        depth = d
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("0")
+                            .parse()
+                            .unwrap_or(0);
                     }
                     if let Some(f) = line.split("found=").nth(1) {
-                        found = f.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
+                        found = f
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("0")
+                            .parse()
+                            .unwrap_or(0);
                     }
                     if let Some(u) = line.split_whitespace().last() {
                         if u.starts_with("http") {
@@ -285,18 +333,27 @@ pub async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result
                         }
                     }
 
-                    let _ = app.emit("pre-crawl-progress", PreCrawlProgress {
-                        depth, found, url, is_doc,
-                    });
+                    let _ = app.emit(
+                        "pre-crawl-progress",
+                        PreCrawlProgress {
+                            depth,
+                            found,
+                            url,
+                            is_doc,
+                        },
+                    );
                 }
 
                 // Forward ALL lines as log via crawl-progress event
-                let _ = app.emit("crawl-progress", CrawlProgress {
-                    line: line.clone(),
-                    file_name: String::new(),
-                    status: "info".to_string(),
-                    url: String::new(),
-                });
+                let _ = app.emit(
+                    "crawl-progress",
+                    CrawlProgress {
+                        line: line.clone(),
+                        file_name: String::new(),
+                        status: "info".to_string(),
+                        url: String::new(),
+                    },
+                );
             }
 
             CRAWLER_PID.store(0, Ordering::SeqCst);
@@ -313,9 +370,9 @@ pub async fn run_pre_crawl(app: tauri::AppHandle, config_path: String) -> Result
         let _ = tx.send(result);
     });
 
-    tokio::task::spawn_blocking(move || {
-        rx.recv().map_err(|e| format!("Channel error: {}", e))?
-    }).await.map_err(|e| format!("Task error: {}", e))?
+    tokio::task::spawn_blocking(move || rx.recv().map_err(|e| format!("Channel error: {}", e))?)
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
@@ -324,7 +381,7 @@ pub fn stop_crawler() -> Result<String, String> {
     if pid == 0 {
         return Ok("No running process".to_string());
     }
-    
+
     // Send SIGTERM first for graceful shutdown
     #[cfg(unix)]
     {
@@ -354,7 +411,7 @@ pub fn stop_crawler() -> Result<String, String> {
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn();
     }
-    
+
     // Don't clear PID here - let the reader thread clear it when process actually exits
     Ok(format!("Stopping process {}", pid))
 }
@@ -375,13 +432,18 @@ pub fn save_pre_crawl_result(config_path: String, data: String) -> Result<(), St
     // Sanitize URL for filename
     let safe_name: String = first_url
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    
+
     let filename = format!(".pre_crawl_{}.json", safe_name);
     let path = data_dir().join(&filename);
-    std::fs::write(&path, &data)
-        .map_err(|e| format!("Failed to save pre-crawl result: {}", e))
+    std::fs::write(&path, &data).map_err(|e| format!("Failed to save pre-crawl result: {}", e))
 }
 
 #[tauri::command]
@@ -399,13 +461,18 @@ pub fn load_pre_crawl_result(config_path: String) -> Result<String, String> {
     }
     let safe_name: String = first_url
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    
+
     let filename = format!(".pre_crawl_{}.json", safe_name);
     let path = data_dir().join(&filename);
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("No pre-crawl data: {}", e))
+    std::fs::read_to_string(&path).map_err(|e| format!("No pre-crawl data: {}", e))
 }
 
 #[tauri::command]
@@ -424,12 +491,22 @@ pub fn clear_output(output_dir: String, subdirs: Vec<String>) -> Result<String, 
         if path.exists() && path.is_dir() {
             let docs = path.join("docs");
             let meta = path.join("meta");
+            let raw = path.join("raw");
             let index = path.join("index.json");
-            
-            if docs.exists() { let _ = std::fs::remove_dir_all(&docs); }
-            if meta.exists() { let _ = std::fs::remove_dir_all(&meta); }
-            if index.exists() { let _ = std::fs::remove_file(&index); }
-            
+
+            if docs.exists() {
+                let _ = std::fs::remove_dir_all(&docs);
+            }
+            if meta.exists() {
+                let _ = std::fs::remove_dir_all(&meta);
+            }
+            if raw.exists() {
+                let _ = std::fs::remove_dir_all(&raw);
+            }
+            if index.exists() {
+                let _ = std::fs::remove_file(&index);
+            }
+
             removed += 1;
         }
     }
@@ -504,13 +581,18 @@ pub fn read_file_content(output_dir: String, filename: String) -> Result<String,
     } else {
         ("", filename.as_str())
     };
-    
-    for ext in &[".md", ".html", ".htm", ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".xml", ".json", ".rtf", ".odt", ".epub", ".rst", ".yaml", ".yml", ".log", ".tex"] {
+
+    for ext in &[
+        ".md", ".html", ".htm", ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".csv", ".xml", ".json", ".rtf", ".odt", ".epub", ".rst", ".yaml", ".yml", ".log", ".tex",
+    ] {
         // New structure: site_name/docs/file.ext
         let docs_path = if site_dir.is_empty() {
             base.join("docs").join(format!("{}{}", file_base, ext))
         } else {
-            base.join(site_dir).join("docs").join(format!("{}{}", file_base, ext))
+            base.join(site_dir)
+                .join("docs")
+                .join(format!("{}{}", file_base, ext))
         };
         if docs_path.exists() {
             let content = std::fs::read_to_string(&docs_path)
@@ -533,7 +615,7 @@ pub fn read_file_content(output_dir: String, filename: String) -> Result<String,
 fn render_for_preview(content: &str, ext: &str) -> String {
     match ext {
         ".md" => {
-            use pulldown_cmark::{Parser, Options, html};
+            use pulldown_cmark::{html, Options, Parser};
             let mut options = Options::empty();
             options.insert(Options::ENABLE_TABLES);
             options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -570,10 +652,13 @@ pub fn list_crawled_sites(output_dir: String) -> Result<String, String> {
                     if index_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&index_path) {
                             if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-                                if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                                if let Some(tree) =
+                                    data.get("file_tree").and_then(|t| t.as_object())
+                                {
                                     file_count = tree.len() as u32;
                                 }
-                                if let Some(ts) = data.get("last_updated").and_then(|v| v.as_str()) {
+                                if let Some(ts) = data.get("last_updated").and_then(|v| v.as_str())
+                                {
                                     last_updated = ts.to_string();
                                 }
                             }
@@ -584,7 +669,8 @@ pub fn list_crawled_sites(output_dir: String) -> Result<String, String> {
                         let docs_path = path.join("docs");
                         if docs_path.is_dir() {
                             if let Ok(files) = std::fs::read_dir(&docs_path) {
-                                file_count = files.flatten().filter(|f| f.path().is_file()).count() as u32;
+                                file_count =
+                                    files.flatten().filter(|f| f.path().is_file()).count() as u32;
                             }
                         }
                     }
@@ -602,7 +688,12 @@ pub fn list_crawled_sites(output_dir: String) -> Result<String, String> {
         }
     }
     // Sort by name
-    sites.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+    sites.sort_by(|a, b| {
+        a["name"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["name"].as_str().unwrap_or(""))
+    });
     Ok(serde_json::to_string(&sites).unwrap_or_else(|_| "[]".to_string()))
 }
 
@@ -652,9 +743,12 @@ pub fn read_site_index(output_dir: String, site_name: String) -> Result<String, 
                             // Strip the extension to get the display name
                             let display = fname.rsplit_once('.').map(|(n, _)| n).unwrap_or(fname);
                             let full_name = format!("{}/{}", site_name, display);
-                            prefixed_tree.insert(full_name, serde_json::json!({
-                                "source_url": ""
-                            }));
+                            prefixed_tree.insert(
+                                full_name,
+                                serde_json::json!({
+                                    "source_url": ""
+                                }),
+                            );
                         }
                     }
                 }
@@ -673,7 +767,7 @@ pub fn read_site_index(output_dir: String, site_name: String) -> Result<String, 
 pub fn read_index(output_dir: String) -> Result<String, String> {
     let base = resolve_path(&output_dir);
     let mut merged_tree = serde_json::Map::new();
-    
+
     // Scan subdirectories for index.json files
     if base.exists() {
         if let Ok(entries) = std::fs::read_dir(&base) {
@@ -685,7 +779,9 @@ pub fn read_index(output_dir: String) -> Result<String, String> {
                     if index_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&index_path) {
                             if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-                                if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                                if let Some(tree) =
+                                    data.get("file_tree").and_then(|t| t.as_object())
+                                {
                                     for (name, meta) in tree {
                                         // Key includes subdir: "www.example.com/page_name"
                                         let full_name = format!("{}/{}", subdir_name, name);
@@ -699,7 +795,7 @@ pub fn read_index(output_dir: String) -> Result<String, String> {
             }
         }
     }
-    
+
     // Also check for legacy root-level index.json
     let root_index = base.join("index.json");
     if root_index.exists() {
@@ -715,7 +811,7 @@ pub fn read_index(output_dir: String) -> Result<String, String> {
             }
         }
     }
-    
+
     let result = serde_json::json!({
         "file_tree": merged_tree,
         "total_files": merged_tree.len()
@@ -739,14 +835,14 @@ pub fn get_app_version() -> Result<serde_json::Value, String> {
     let version = env!("CARGO_PKG_VERSION");
     let git_hash = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
     let git_date = option_env!("GIT_COMMIT_DATE").unwrap_or("unknown");
-    
+
     // 构建完整版本号：1.0.0+f49f63c
     let full_version = if git_hash != "unknown" {
         format!("{}+{}", version, git_hash)
     } else {
         version.to_string()
     };
-    
+
     Ok(serde_json::json!({
         "version": version,
         "full_version": full_version,
@@ -754,4 +850,11 @@ pub fn get_app_version() -> Result<serde_json::Value, String> {
         "git_date": git_date,
         "build_time": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
     }))
+}
+
+#[tauri::command]
+pub fn get_absolute_path(path: String) -> Result<String, String> {
+    Ok(crate::fs_utils::resolve_path(&path)
+        .to_string_lossy()
+        .to_string())
 }

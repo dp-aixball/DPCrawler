@@ -85,7 +85,17 @@ class StorageManager:
         """Compute MD5 hash of content"""
         return hashlib.md5(content.encode("utf-8")).hexdigest()
 
-    def save_content(self, filename: str, content: str, source_url: str, title: str = "", content_type: str = "text/html", raw_html: str = "") -> Optional[str]:
+    def save_content(
+        self, 
+        filename: str, 
+        content: str, 
+        source_url: str, 
+        title: str = "", 
+        content_type: str = "text/html", 
+        raw_html: str = "",
+        raw_bytes: bytes = None,
+        original_ext: str = ""
+    ) -> Optional[str]:
         """Save content and its metadata, returns file status: 'new', 'updated', 'unchanged', or None on error"""
         try:
             docs_dir = os.path.join(self.output_dir, "docs")
@@ -97,9 +107,12 @@ class StorageManager:
             base_filename = self._sanitize_filename(filename)
             content_path = os.path.join(docs_dir, f"{base_filename}{ext}")
 
-            # Compute MD5 from raw HTML (original content) for accurate change detection
-            md5_source = raw_html if raw_html else content
-            new_md5 = self.compute_md5(md5_source)
+            # Compute MD5 from raw bytes or HTML for accurate change detection
+            if raw_bytes is not None:
+                new_md5 = hashlib.md5(raw_bytes).hexdigest()
+            else:
+                md5_source = raw_html if raw_html else content
+                new_md5 = self.compute_md5(md5_source)
 
             # Check if file is unchanged
             if base_filename in self.index and self.index[base_filename].md5 == new_md5:
@@ -125,6 +138,20 @@ class StorageManager:
                 meta_path = os.path.join(meta_dir, f"{base_filename}.json")
                 with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(asdict(meta), f, ensure_ascii=False, indent=2)
+
+            # Save raw document if available
+            raw_dir = os.path.join(self.output_dir, "raw")
+            if raw_bytes is not None:
+                os.makedirs(raw_dir, exist_ok=True)
+                raw_file_ext = original_ext if original_ext else self._get_extension(content_type, filename)
+                raw_path = os.path.join(raw_dir, f"{base_filename}{raw_file_ext}")
+                with open(raw_path, "wb") as bf:
+                    bf.write(raw_bytes)
+            elif raw_html:
+                os.makedirs(raw_dir, exist_ok=True)
+                raw_path = os.path.join(raw_dir, f"{base_filename}.html")
+                with open(raw_path, "w", encoding="utf-8") as tf:
+                    tf.write(raw_html)
 
             # Update index
             was_new = base_filename not in self.index
