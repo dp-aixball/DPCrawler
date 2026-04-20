@@ -502,7 +502,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (el.docxContainer) el.docxContainer.style.display = 'none';
             if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
             el.rawIframe.style.display = 'block';
-            el.rawIframe.srcdoc = info.content;
+            var htmlContent = info.content;
+            if (info.source_url) {
+              var baseTag = '<base href="' + info.source_url + '">';
+              if (htmlContent.match(/<head[^>]*>/i)) {
+                htmlContent = htmlContent.replace(/(<head[^>]*>)/i, '$1\n' + baseTag);
+              } else {
+                htmlContent = baseTag + '\n' + htmlContent;
+              }
+            }
+            el.rawIframe.srcdoc = htmlContent;
           } else if (info.is_pdf && info.base64) {
             if (el.docxContainer) el.docxContainer.style.display = 'none';
             if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';

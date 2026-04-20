@@ -913,6 +913,27 @@ pub fn get_raw_file_info(
                             }
                         }
 
+                        let mut source_url = String::new();
+                        let meta_path = if site_dir.is_empty() {
+                            base.join("meta").join(format!("{}.json", file_base))
+                        } else {
+                            base.join(site_dir)
+                                .join("meta")
+                                .join(format!("{}.json", file_base))
+                        };
+
+                        if let Ok(meta_str) = std::fs::read_to_string(&meta_path) {
+                            if let Ok(meta_json) =
+                                serde_json::from_str::<serde_json::Value>(&meta_str)
+                            {
+                                if let Some(url) =
+                                    meta_json.get("source_url").and_then(|u| u.as_str())
+                                {
+                                    source_url = url.to_string();
+                                }
+                            }
+                        }
+
                         return Ok(serde_json::json!({
                             "path": path.to_string_lossy().to_string(),
                             "ext": ext,
@@ -921,7 +942,8 @@ pub fn get_raw_file_info(
                             "is_docx": is_docx,
                             "is_xlsx": is_xlsx,
                             "content": content,
-                            "base64": base64_data
+                            "base64": base64_data,
+                            "source_url": source_url
                         }));
                     }
                 }
