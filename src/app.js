@@ -622,15 +622,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (clearBtn) clearBtn.disabled = lock;
     if (el.browseDirBtn) el.browseDirBtn.disabled = lock;
     if (el.openDirBtn) el.openDirBtn.disabled = lock;
-    // Lock site-item action buttons (delete / open folder) and entire site list
-    document.querySelectorAll('.site-delete, .site-open').forEach(function (btn) {
+    // Lock site-item action buttons (delete) but allow opening folders & site list
+    document.querySelectorAll('.site-delete').forEach(function (btn) {
       btn.style.pointerEvents = lock ? 'none' : '';
       btn.style.opacity = lock ? '0.3' : '';
     });
-    if (el.siteList) {
-      el.siteList.style.pointerEvents = lock ? 'none' : '';
-      el.siteList.style.opacity = lock ? '0.5' : '';
-    }
     // delay is always editable
   }
 
@@ -733,7 +729,7 @@ document.addEventListener('DOMContentLoaded', function () {
               selectSite(site.name, div);
             });
             el.siteList.appendChild(div);
-            if (autoSelectSite && site.name === autoSelectSite) {
+            if ((autoSelectSite === true && i === 0) || (autoSelectSite && site.name === autoSelectSite)) {
               selectSite(site.name, div);
             }
           })(sites[i]);
@@ -1097,7 +1093,7 @@ document.addEventListener('DOMContentLoaded', function () {
   el.outputDir.addEventListener('change', function () {
     if (isRunning) return;
     updateRecentDirsList(el.outputDir.value);
-    loadSiteList();
+    loadSiteList(true);
     el.fileList.innerHTML = '<div class="file-item"><span>\u6682\u65e0\u6587\u4ef6</span></div>';
     el.totalCount.textContent = '0';
     el.unchangedCount.textContent = '0';
@@ -1152,6 +1148,17 @@ document.addEventListener('DOMContentLoaded', function () {
         });
       }
       updateRecentDirsList(el.outputDir.value);
+      var targetSite = null;
+      var curUrl = el.urls.value.trim().split('\n')[0];
+      if (curUrl) {
+        try {
+          if (curUrl.indexOf('://') === -1) curUrl = 'https://' + curUrl;
+          var a = document.createElement('a');
+          a.href = curUrl;
+          if (a.hostname) targetSite = a.hostname;
+        } catch (e) { }
+      }
+      loadSiteList(targetSite || true);
       log('\u914d\u7f6e\u5df2\u52a0\u8f7d', 'success');
     }, function () {
       updateRecentDirsList(el.outputDir.value);
