@@ -42,16 +42,16 @@ impl SearchResult {
             url::form_urlencoded::byte_serialize(self.matched_block.as_bytes()).collect::<String>();
 
         self.md_download_url = Some(format!(
-            "http://127.0.0.1:{}/files/{}/docs/{}.md?output_dir={}",
-            port, site_name, file_base, safe_out
+            "/files/{}/docs/{}.md?output_dir={}",
+            site_name, file_base, safe_out
         ));
         self.html_view_url = Some(format!(
-            "http://127.0.0.1:{}/files/{}/html_views/{}.html?output_dir={}&highlight={}",
-            port, site_name, file_base, safe_out, safe_query
+            "/files/{}/html_views/{}.html?output_dir={}&highlight={}",
+            site_name, file_base, safe_out, safe_query
         ));
         self.html_block_view_url = Some(format!(
-            "http://127.0.0.1:{}/files/{}/html_views/{}.html?output_dir={}&highlight_block={}",
-            port, site_name, file_base, safe_out, safe_block
+            "/files/{}/html_views/{}.html?output_dir={}&highlight_block={}",
+            site_name, file_base, safe_out, safe_block
         ));
     }
 }

@@ -76,8 +76,12 @@ async fn file_handler(
         .cloned()
         .unwrap_or_else(|| "./output".to_string());
     let base = crate::fs_utils::resolve_path(&output_dir);
-    // Path might contain urlencoded characters, handled automatically by axum Path wrapper
-    let full_path = base.join(&path);
+    // 增加对 headless_client.html 测试探针文件的白名单放行（从根目录加载而不是 output_dir）
+    let full_path = if path == "headless_client.html" {
+        crate::fs_utils::resolve_path(".").join(&path)
+    } else {
+        base.join(&path)
+    };
 
     if let Ok(bytes) = tokio::fs::read(&full_path).await {
         let mime = mime_guess::from_path(&full_path).first_or_octet_stream();
@@ -213,9 +217,16 @@ document.addEventListener("DOMContentLoaded", function() {{
             }
         }
 
+        let content_type_str = mime.as_ref();
+        let final_content_type = if content_type_str.starts_with("text/") {
+            format!("{}; charset=utf-8", content_type_str)
+        } else {
+            content_type_str.to_string()
+        };
+
         Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", mime.as_ref())
+            .header("Content-Type", final_content_type)
             .body(axum::body::Body::from(body_bytes))
             .unwrap()
     } else {
