@@ -267,7 +267,9 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
     let content_lower = content.to_lowercase();
     let lines_lower: Vec<&str> = content_lower.lines().collect();
 
-    let mut hit_lines = Vec::new();
+    let mut line_hits: Vec<usize> = vec![0; lines.len()];
+    let mut max_hits = 0;
+
     for (i, line) in lines_lower.iter().enumerate() {
         let mut hits = 0;
         for token in query_tokens {
@@ -275,7 +277,25 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
                 hits += 1;
             }
         }
-        if hits > 0 {
+        if hits > max_hits {
+            max_hits = hits;
+        }
+        line_hits[i] = hits;
+    }
+
+    if max_hits == 0 {
+        return (0, 0, String::new());
+    }
+
+    let threshold = if max_hits >= 6 {
+        std::cmp::max(2, max_hits / 4)
+    } else {
+        1
+    };
+
+    let mut hit_lines = Vec::new();
+    for (i, &hits) in line_hits.iter().enumerate() {
+        if hits >= threshold {
             hit_lines.push((i, hits));
         }
     }
@@ -312,6 +332,20 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
     if curr_score > best_score {
         best_start = curr_start;
         best_end = curr_end;
+    }
+
+    let block_len = best_end.saturating_sub(best_start) + 1;
+    if block_len > 15 {
+        let mut peak_in_block = best_start;
+        let mut local_max = 0;
+        for j in best_start..=best_end {
+            if line_hits[j] > local_max {
+                local_max = line_hits[j];
+                peak_in_block = j;
+            }
+        }
+        best_start = peak_in_block.saturating_sub(5);
+        best_end = std::cmp::min(peak_in_block + 10, best_end);
     }
 
     let block = lines[best_start..=best_end].join("\n");
