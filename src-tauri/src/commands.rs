@@ -528,6 +528,7 @@ pub fn delete_site(output_dir: String, site_name: String) -> Result<String, Stri
 
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
+    println!("Frontend requested open_url: {}", url);
     let target = if url.starts_with("http://") || url.starts_with("https://") {
         url.clone()
     } else {
@@ -610,16 +611,94 @@ pub fn read_file_content(output_dir: String, filename: String) -> Result<String,
     Err(format!("File not found: {}", filename))
 }
 
+#[tauri::command]
+pub fn read_markdown_raw(output_dir: String, filename: String) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let parts: Vec<&str> = filename.splitn(2, '/').collect();
+    let (site_dir, file_base) = if parts.len() == 2 {
+        (parts[0], parts[1])
+    } else {
+        ("", filename.as_str())
+    };
+
+    for ext in &[".md", ".txt", ".json", ".yaml", ".yml", ".csv"] {
+        let docs_path = if site_dir.is_empty() {
+            base.join("docs").join(format!("{}{}", file_base, ext))
+        } else {
+            base.join(site_dir)
+                .join("docs")
+                .join(format!("{}{}", file_base, ext))
+        };
+        if docs_path.exists() {
+            let content = std::fs::read_to_string(&docs_path)
+                .map_err(|e| format!("Failed to read file: {}", e))?;
+            return Ok(content);
+        }
+        let legacy_path = base.join(format!("{}{}", filename, ext));
+        if legacy_path.exists() {
+            let content = std::fs::read_to_string(&legacy_path)
+                .map_err(|e| format!("Failed to read file: {}", e))?;
+            return Ok(content);
+        }
+    }
+    Err(format!("Markdown file not found: {}", filename))
+}
+
+#[tauri::command]
+pub fn get_processed_file_path(output_dir: String, filename: String) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let parts: Vec<&str> = filename.splitn(2, '/').collect();
+    let (site_dir, file_base) = if parts.len() == 2 {
+        (parts[0], parts[1])
+    } else {
+        ("", filename.as_str())
+    };
+
+    for ext in &[
+        ".md", ".html", ".htm", ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".csv", ".xml", ".json", ".rtf", ".odt", ".epub", ".rst", ".yaml", ".yml", ".log", ".tex",
+    ] {
+        let docs_path = if site_dir.is_empty() {
+            base.join("docs").join(format!("{}{}", file_base, ext))
+        } else {
+            base.join(site_dir)
+                .join("docs")
+                .join(format!("{}{}", file_base, ext))
+        };
+        if docs_path.exists() {
+            return Ok(docs_path.to_string_lossy().into_owned());
+        }
+        let legacy_path = base.join(format!("{}{}", filename, ext));
+        if legacy_path.exists() {
+            return Ok(legacy_path.to_string_lossy().into_owned());
+        }
+    }
+    Err(format!("Path not found for: {}", filename))
+}
+
 /// Convert file content to HTML for preview.
 /// Markdown files are rendered via pulldown-cmark; others are wrapped in <pre>.
 fn render_for_preview(content: &str, ext: &str) -> String {
     match ext {
         ".md" => {
             use pulldown_cmark::{html, Options, Parser};
+
+            let mut md_content = content.trim_start();
+            if md_content.starts_with("---") {
+                if let Some(end_idx) = md_content[3..].find("\n---") {
+                    md_content = &md_content[3 + end_idx + 4..];
+                }
+            } else if md_content.starts_with("```yaml") || md_content.starts_with("```ymal") {
+                if let Some(end_idx) = md_content[7..].find("\n```") {
+                    md_content = &md_content[7 + end_idx + 4..];
+                }
+            }
+            md_content = md_content.trim_start();
+
             let mut options = Options::empty();
             options.insert(Options::ENABLE_TABLES);
             options.insert(Options::ENABLE_STRIKETHROUGH);
-            let parser = Parser::new_ext(content, options);
+            let parser = Parser::new_ext(md_content, options);
             let mut html_output = String::with_capacity(content.len() * 2);
             html::push_html(&mut html_output, parser);
             html_output
@@ -952,4 +1031,10 @@ pub fn get_raw_file_info(
     }
 
     Err("源文件已被删除或未备份".to_string())
+}
+
+#[tauri::command]
+pub fn copy_text_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
 }

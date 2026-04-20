@@ -19,6 +19,25 @@
 </head>
 
 <body>
+  <div id="fileContextMenu" class="context-menu"
+    style="display:none; position:fixed; z-index:9999; background:#fff; border:1px solid #ccc; box-shadow:0 2px 5px rgba(0,0,0,0.2); border-radius:4px; padding:5px 0; min-width:120px;">
+    <div class="menu-item" data-action="copy-path"
+      style="padding:8px 15px; cursor:pointer; font-size:13px; color:#333;">拷贝文件路径</div>
+    <div class="menu-item" data-action="copy-content"
+      style="padding:8px 15px; cursor:pointer; font-size:13px; color:#333;">拷贝文件内容</div>
+    <div class="menu-item" data-action="open-dir" style="padding:8px 15px; cursor:pointer; font-size:13px; color:#333;">
+      打开所在目录</div>
+  </div>
+  <style>
+    .context-menu .menu-item {
+      transition: background 0.15s;
+    }
+
+    .context-menu .menu-item:hover {
+      background-color: #f0f0f0;
+    }
+  </style>
+
   <div class="app">
 
     <div class="main">
@@ -142,9 +161,13 @@
             <div class="preview-panel" id="previewPanel">
               <div class="preview-header">
                 <span id="previewTitle">选择文件预览</span>
-                <div class="preview-actions" style="margin-left:auto">
-                  <button id="previewModeBtn" class="btn btn-secondary btn-sm"
-                    style="display:none; padding:2px 8px; font-size:12px;">查看源材料 (Raw)</button>
+                <div class="preview-actions" id="previewModeGroup" style="display:none; margin-left:auto; gap:4px;">
+                  <button data-mode="md" class="btn btn-primary btn-sm"
+                    style="padding:2px 8px; font-size:12px;">Markdown</button>
+                  <button data-mode="meta" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:12px;">元数据
+                    (Meta)</button>
+                  <button data-mode="raw" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:12px;">源材料
+                    (Raw)</button>
                 </div>
               </div>
               <div class="preview-content" id="previewContent">单击左侧文件即可预览内容</div>

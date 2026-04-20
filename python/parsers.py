@@ -247,6 +247,46 @@ def html_to_markdown(html: str, base_url: str = "") -> str:
     return result_md
 
 
+def extract_true_title(html: str, default_title: str) -> str:
+    """Heuristic fallback to extract true document title from badly coded sites."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        
+        # 1. Classic article title identifiers
+        identifiers = [
+            'arti_title', 'title', 'news_title', 'article-title', 'con_title', 
+            'bt', 'biaoti', 'tit', 'article_title', 'arti-name', 'titleTxt',
+            'info-ctit', 'info_title', 'articleTitle', 'NewsTitle'
+        ]
+        for ident in identifiers:
+            t_elem = soup.find(class_=ident) or soup.find(id=ident)
+            if t_elem:
+                text = t_elem.get_text(separator=' ', strip=True)
+                if len(text) > 4:
+                    return text
+
+        # 2. Header tags
+        for tag in ['h1', 'h2']:
+            for elem in soup.find_all(tag):
+                text = elem.get_text(separator=' ', strip=True)
+                if 6 < len(text) < 100:
+                    if not default_title or text not in default_title:
+                        return text
+
+        # 3. Readability short title
+        try:
+            from readability import Document
+            doc = Document(html)
+            r_title = doc.short_title().strip()
+            if len(r_title) > 4 and r_title != default_title:
+                return r_title
+        except:
+            pass
+    except Exception:
+        pass
+    return default_title
+
+
 def universal_html_extract(html: str, base_url: str = "") -> dict:
     """
     Extract main content and metadata using Trafilatura for universal support.
@@ -284,6 +324,20 @@ def universal_html_extract(html: str, base_url: str = "") -> dict:
             
             # Clean up metadata (remove Nones)
             clean_meta = {k: v for k, v in meta_dict.items() if v}
+            
+            title_text = clean_meta.get('title', '').strip()
+            
+            # Cross-verify and fix title using heuristics
+            better_title = extract_true_title(html_processed, title_text)
+            if better_title:
+                clean_meta['title'] = better_title
+                title_text = better_title
+            
+            # Re-inject title into body if not already present
+            if title_text:
+                md_head = md_content[:200].replace('#', '').strip()
+                if title_text not in md_head and not md_head.startswith(title_text[:10]):
+                    md_content = f"# {title_text}\n\n{md_content}"
             
             return {"content": md_content, "metadata": clean_meta}
         else:

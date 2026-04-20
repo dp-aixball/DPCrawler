@@ -364,13 +364,15 @@ class WebCrawler:
             extracted = parsers.universal_html_extract(response.text, url)
             content = extracted["content"]
             metadata = extracted.get("metadata", {})
+            metadata["source_url"] = url
             if metadata.get("title"):
                 title = metadata["title"]
+            else:
+                metadata["title"] = title
                 
-            if metadata:
-                import yaml
-                meta_yml = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
-                content = f"---\n{meta_yml}\n---\n\n{content}"
+            import yaml
+            meta_yml = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
+            content = f"---\n{meta_yml}\n---\n\n{content}"
 
             if self.config.recursive and depth < self.config.max_depth:
                 sub_links = self.extract_links(soup, url)
@@ -456,7 +458,10 @@ class WebCrawler:
                 content_skip = True
 
         if not content_skip:
-            content = f"> 来源: {url}\n\n{content}"
+            if not content.startswith("---"):
+                import yaml
+                meta_yml = yaml.dump({"source_url": url, "title": title}, allow_unicode=True, default_flow_style=False).strip()
+                content = f"---\n{meta_yml}\n---\n\n{content}"
 
             with self._lock:
                 status = self.storage.save_content(
@@ -771,13 +776,15 @@ class WebCrawler:
                     extracted = parsers.universal_html_extract(html_text, source_url)
                     content = extracted["content"]
                     metadata = extracted.get("metadata", {})
+                    metadata["source_url"] = source_url
                     if metadata.get("title"):
                         title = metadata["title"]
+                    else:
+                        metadata["title"] = title
                         
-                    if metadata:
-                        import yaml
-                        meta_yml = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
-                        content = f"---\n{meta_yml}\n---\n\n{content}"
+                    import yaml
+                    meta_yml = yaml.dump(metadata, allow_unicode=True, default_flow_style=False).strip()
+                    content = f"---\n{meta_yml}\n---\n\n{content}"
 
 
                 elif ext in all_plain_exts - {'.html', '.htm'}:
@@ -823,7 +830,10 @@ class WebCrawler:
                 if content is None:
                     continue
 
-                content = f"> 来源: {source_url}\n\n{content}"
+                if not content.startswith("---"):
+                    import yaml
+                    meta_yml = yaml.dump({"source_url": source_url, "title": title}, allow_unicode=True, default_flow_style=False).strip()
+                    content = f"---\n{meta_yml}\n---\n\n{content}"
 
                 with self._lock:
                     status = self.storage.save_content(

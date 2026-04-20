@@ -1,7 +1,7 @@
 {
   "name": "dpcrawler",
-  "version": "1.0.0",
-  "description": "RAG Knowledge Crawler",
+  "version": "2.0.0",
+  "description": "DPCrawler - AI RAG Crawler",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

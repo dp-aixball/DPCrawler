@@ -1,7 +1,7 @@
 [package]
 name = "dpcrawler"
-version = "1.0.0"
-description = "RAG Knowledge Crawler"
+version = "2.0.0"
+description = "A Tauri App"
 authors = [""]
 edition = "2021"
 
@@ -25,6 +25,7 @@ pulldown-cmark = "0.11"
 tauri-plugin-window-state = "2"
 chrono = "0.4"
 base64 = "0.22.1"
+tauri-plugin-clipboard-manager = "2.3.2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

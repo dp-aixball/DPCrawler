@@ -21,6 +21,7 @@ pub fn run() {
     }
 
     builder
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             commands::run_crawler,
             commands::run_pre_crawl,
@@ -32,6 +33,7 @@ pub fn run() {
             commands::read_index,
             commands::open_url,
             commands::read_file_content,
+            commands::read_markdown_raw,
             commands::update_delay,
             commands::clear_output,
             commands::delete_site,
@@ -41,7 +43,9 @@ pub fn run() {
             commands::force_quit,
             commands::get_app_version,
             commands::get_absolute_path,
-            commands::get_raw_file_info
+            commands::get_processed_file_path,
+            commands::get_raw_file_info,
+            commands::copy_text_to_clipboard
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();

@@ -81,13 +81,59 @@ document.addEventListener('DOMContentLoaded', function () {
     totalCount: document.getElementById('totalCount'),
     previewTitle: document.getElementById('previewTitle'),
     previewContent: document.getElementById('previewContent'),
-    previewModeBtn: document.getElementById('previewModeBtn'),
+    previewModeGroup: document.getElementById('previewModeGroup'),
     rawIframe: document.getElementById('rawIframe'),
     docxContainer: document.getElementById('docxContainer'),
     xlsxContainer: document.getElementById('xlsxContainer'),
     siteList: document.getElementById('siteList'),
     themeSelect: document.getElementById('themeSelect')
   };
+
+  // Context menu logic
+  var ctxMenu = document.getElementById('fileContextMenu');
+  var currentCtxFile = null;
+
+  document.addEventListener('click', function (e) {
+    if (ctxMenu && e.target !== ctxMenu && !ctxMenu.contains(e.target)) {
+      ctxMenu.style.display = 'none';
+    }
+  });
+
+  if (ctxMenu) {
+    ctxMenu.addEventListener('click', function (e) {
+      if (!currentCtxFile) return;
+      var action = e.target.getAttribute('data-action');
+      if (!action) return;
+      var outputDir = el.outputDir.value || './output';
+      var relPath = activeSite + '/docs/' + currentCtxFile.name;
+
+      if (action === 'copy-path') {
+        invoke('get_processed_file_path', { outputDir: outputDir, filename: currentCtxFile.name }).then(function (absPath) {
+          invoke('copy_text_to_clipboard', { text: absPath }).then(function () {
+            log('\u5df2\u62f7\u8d1d\u8def\u5f84: ' + absPath, 'success');
+          });
+        }).catch(function (e) {
+          log('\u65e0\u6cd5\u83b7\u53d6\u6587\u4ef6\u8def\u5f84: ' + e, 'error');
+        });
+      } else if (action === 'copy-content') {
+        invoke('read_file_content', { outputDir: outputDir, siteName: activeSite, filename: currentCtxFile.name }).then(function (content) {
+          invoke('copy_text_to_clipboard', { text: content }).then(function () {
+            log('\u5df2\u62f7\u8d1d\u6587\u4ef6\u5185\u5bb9: ' + currentCtxFile.name, 'success');
+          });
+        }).catch(function (err) {
+          log('\u62f7\u8d1d\u5185\u5bb9\u5931\u8d25: ' + err, 'error');
+        });
+      } else if (action === 'open-dir') {
+        invoke('get_processed_file_path', { outputDir: outputDir, filename: currentCtxFile.name }).then(function (absPath) {
+          var dirPath = absPath.substring(0, Math.max(absPath.lastIndexOf('/'), absPath.lastIndexOf('\\')));
+          invoke('open_url', { url: dirPath });
+        }).catch(function (e) {
+          log('\u6253\u5f00\u76ee\u5f55\u5931\u8d25: ' + e, 'error');
+        });
+      }
+      ctxMenu.style.display = 'none';
+    });
+  }
 
   var activeSite = null; // currently selected site in sidebar
 
@@ -291,10 +337,33 @@ document.addEventListener('DOMContentLoaded', function () {
         displayName = f.name.substring(slashIdx + 1);
       }
       var fileExt = getFileTypeFromUrl(f.url);
+      var contentFormat = el.contentFormat.value;
+      var outExt = 'md';
+      if (contentFormat === 'json') outExt = 'json';
+      else if (contentFormat === 'txt') outExt = 'txt';
+
+      var displaySafeName = displayName + '.' + outExt;
+
       div.innerHTML = '<span class="file-badge ' + badgeClass + '">' + badgeText + '</span>' +
         fileTypeIconHtml(fileExt) +
         (subdir ? '<span class="file-subdir">' + subdir + '</span>' : '') +
-        '<span class="file-name">' + displayName + '</span>';
+        '<span class="file-name">' + displaySafeName + '</span>';
+
+      div.addEventListener('contextmenu', (function (fObj) {
+        return function (e) {
+          e.preventDefault();
+          var items = el.fileList.querySelectorAll('.file-item');
+          for (var j = 0; j < items.length; j++) items[j].classList.remove('selected');
+          this.classList.add('selected');
+          currentCtxFile = fObj;
+          if (ctxMenu) {
+            ctxMenu.style.display = 'block';
+            ctxMenu.style.left = e.clientX + 'px';
+            ctxMenu.style.top = e.clientY + 'px';
+          }
+        };
+      })(f));
+
       fragment.appendChild(div);
     }
     el.fileList.innerHTML = '';
@@ -465,6 +534,7 @@ document.addEventListener('DOMContentLoaded', function () {
     s = '<p>' + s + '</p>';
     // Single newlines to <br>
     s = s.replace(/\n/g, '<br>');
+
     return s;
   }
 
@@ -474,9 +544,16 @@ document.addEventListener('DOMContentLoaded', function () {
   function loadPreview(filename, url) {
     currentPreviewFilename = filename;
     el.previewTitle.textContent = filename;
-    if (el.previewModeBtn) {
-      el.previewModeBtn.style.display = 'inline-block';
-      el.previewModeBtn.textContent = currentPreviewMode === 'md' ? '查看源材料 (Raw)' : '返回 Markdown';
+    if (el.previewModeGroup) {
+      el.previewModeGroup.style.display = 'flex';
+      var btns = el.previewModeGroup.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].getAttribute('data-mode') === currentPreviewMode) {
+          btns[i].className = 'btn btn-primary btn-sm';
+        } else {
+          btns[i].className = 'btn btn-secondary btn-sm';
+        }
+      }
     }
 
     if (currentPreviewMode === 'md') {
@@ -488,6 +565,59 @@ document.addEventListener('DOMContentLoaded', function () {
       var outputDir = el.outputDir.value || './output';
       invoke('read_file_content', { outputDir: outputDir, filename: filename }).then(function (html) {
         el.previewContent.innerHTML = html;
+      }, function (e) {
+        el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
+      });
+    } else if (currentPreviewMode === 'meta') {
+      if (el.rawIframe) el.rawIframe.style.display = 'none';
+      if (el.docxContainer) el.docxContainer.style.display = 'none';
+      if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
+      el.previewContent.style.display = 'block';
+      el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
+      var outputDir = el.outputDir.value || './output';
+      invoke('read_markdown_raw', { outputDir: outputDir, filename: filename }).then(function (rawText) {
+        if (!rawText) {
+          el.previewContent.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary);">暂无 RAG 元数据 (No Frontmatter)</div>';
+          return;
+        }
+        var yamlData = {};
+        var hasFrontmatter = false;
+        var yamlMatch = rawText.match(/^\s*---\r?\n([\s\S]*?)\r?\n---/) || rawText.match(/^\s*```ymal\r?\n([\s\S]*?)\r?\n```/) || rawText.match(/^\s*```yaml\r?\n([\s\S]*?)\r?\n```/);
+        if (yamlMatch) {
+          hasFrontmatter = true;
+          var lines = yamlMatch[1].split('\n');
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            var colonIdx = line.indexOf(':');
+            if (colonIdx > 0) {
+              var key = line.substring(0, colonIdx).trim();
+              var val = line.substring(colonIdx + 1).trim();
+              if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                val = val.substring(1, val.length - 1);
+              }
+              yamlData[key] = val;
+            }
+          }
+        }
+
+        if (!hasFrontmatter) {
+          el.previewContent.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary);">暂无 RAG 元数据 (No Frontmatter)</div>';
+          return;
+        }
+        var metaHtml = '<div style="padding:20px; font-size:14px; line-height:1.6; background:var(--bg-secondary); border-radius:8px; margin: 20px;">';
+        metaHtml += '<h3 style="margin-top:0; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:8px; color:var(--text-primary);">文档元数据 (RAG Metadata)</h3>';
+        metaHtml += '<table style="width:100%; border-collapse:collapse; text-align:left;">';
+        var keys = Object.keys(yamlData);
+        for (var i = 0; i < keys.length; i++) {
+          var k = keys[i];
+          var v = yamlData[k];
+          if (v.startsWith('http')) {
+            v = '<a href="' + v + '" target="_blank" style="color:var(--text-accent); word-break:break-all; text-decoration:none;">' + v + '</a>';
+          }
+          metaHtml += '<tr><td style="padding:10px 8px; border-bottom:1px solid var(--border-color); width:120px; font-weight:600; color:var(--text-secondary);">' + k + '</td><td style="padding:10px 8px; border-bottom:1px solid var(--border-color); color:var(--text-primary); word-break:break-all;">' + v + '</td></tr>';
+        }
+        metaHtml += '</table></div>';
+        el.previewContent.innerHTML = metaHtml;
       }, function (e) {
         el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
       });
@@ -576,11 +706,14 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  if (el.previewModeBtn) {
-    el.previewModeBtn.addEventListener('click', function () {
-      currentPreviewMode = currentPreviewMode === 'md' ? 'raw' : 'md';
-      if (currentPreviewFilename) loadPreview(currentPreviewFilename, '');
-    });
+  if (el.previewModeGroup) {
+    var modeBtns = el.previewModeGroup.querySelectorAll('button');
+    for (var i = 0; i < modeBtns.length; i++) {
+      modeBtns[i].addEventListener('click', function (e) {
+        currentPreviewMode = e.target.getAttribute('data-mode');
+        if (currentPreviewFilename) loadPreview(currentPreviewFilename, '');
+      });
+    }
   }
 
   // Auto-save config on any change (debounced)
@@ -1209,7 +1342,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // About dialog
   document.getElementById('aboutBtn').addEventListener('click', async function () {
     // 获取版本信息
-    let versionInfo = { version: '1.0.0', full_version: '1.0.0', git_hash: 'unknown', git_date: 'unknown' };
+    let versionInfo = { version: '2.0.0', full_version: '2.0.0', git_hash: 'unknown', git_date: 'unknown' };
     try {
       versionInfo = await window.__TAURI__.core.invoke('get_app_version');
     } catch (e) {
