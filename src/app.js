@@ -1561,4 +1561,206 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
+  // --- API Sandbox Logic ---
+  var apiSearchBtn = document.getElementById('apiSearchBtn');
+  var apiSearchInput = document.getElementById('apiSearchInput');
+  var apiTopK = document.getElementById('apiTopK');
+  var apiThreshold = document.getElementById('apiThreshold');
+  var apiResultList = document.getElementById('apiResultList');
+  var apiPreviewContent = document.getElementById('apiPreviewContent');
+  var apiPreviewTitle = document.getElementById('apiPreviewTitle');
+  var apiPanelResizer = document.getElementById('apiPanelResizer');
+
+  // Resizer for API Sandbox panel
+  var apiIsResizing = false;
+  if (apiPanelResizer) {
+    apiPanelResizer.addEventListener('mousedown', function (e) {
+      apiIsResizing = true;
+      document.body.style.cursor = 'col-resize';
+      e.preventDefault();
+    });
+  }
+  document.addEventListener('mousemove', function (e) {
+    if (!apiIsResizing) return;
+    var containerWidth = document.querySelector('#api-sandbox .files-panel').offsetWidth;
+    var listWrapper = document.querySelector('#api-sandbox .file-list-wrapper');
+    var newWidth = Math.max(200, Math.min(e.clientX - 250, containerWidth - 300));
+    listWrapper.style.flex = '0 0 ' + newWidth + 'px';
+  });
+  document.addEventListener('mouseup', function () {
+    if (apiIsResizing) {
+      apiIsResizing = false;
+      document.body.style.cursor = 'default';
+    }
+  });
+
+  function performApiSearch() {
+    var query = apiSearchInput.value.trim();
+    if (!query) return;
+    var topK = parseInt(apiTopK.value, 10) || 5;
+    var threshold = parseFloat(apiThreshold.value) || 0.0;
+    var outputDir = el.outputDir.value || './output';
+    var targetSite = "";
+    var curUrl = el.urls.value.trim().split('\n')[0];
+    if (curUrl) {
+      try {
+        if (curUrl.indexOf('://') === -1) curUrl = 'https://' + curUrl;
+        var a = document.createElement('a');
+        a.href = curUrl;
+        if (a.hostname) targetSite = a.hostname;
+      } catch (e) { }
+    }
+    apiSearchBtn.textContent = '查询中...';
+    apiSearchBtn.disabled = true;
+
+    invoke('api_search', {
+      outputDir: outputDir,
+      siteName: targetSite,
+      query: query,
+      topK: topK,
+      threshold: threshold
+    }).then(function (results) {
+      apiResultList.innerHTML = '';
+      apiSearchBtn.textContent = '请求搜索';
+      apiSearchBtn.disabled = false;
+
+      if (!results || results.length === 0) {
+        apiResultList.innerHTML = '<div class="file-item" style="color: var(--text-muted);"><span>未找到满足条件的数据块</span></div>';
+        return;
+      }
+
+      results.forEach(function (res) {
+        var item = document.createElement('div');
+        item.className = 'file-item';
+        item.style.flexDirection = 'column';
+        item.style.alignItems = 'flex-start';
+        item.style.padding = '10px';
+        item.style.borderBottom = '1px solid var(--border-color)';
+
+        var header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.width = '100%';
+        header.style.marginBottom = '6px';
+
+        var title = document.createElement('strong');
+        title.textContent = res.title || res.filename;
+        title.style.fontSize = '14px';
+        title.style.color = 'var(--text-main)';
+
+        var score = document.createElement('span');
+        score.textContent = '得分: ' + res.score.toFixed(2);
+        score.style.fontSize = '11px';
+        score.style.color = '#f59e0b';
+        score.style.fontWeight = 'bold';
+
+        header.appendChild(title);
+        header.appendChild(score);
+
+        var linesInfo = document.createElement('div');
+        linesInfo.textContent = '📍 连续命中行区间: 第 ' + res.start_line + ' 行 ~ 第 ' + res.end_line + ' 行';
+        linesInfo.style.fontSize = '12px';
+        linesInfo.style.color = 'var(--brand-primary)';
+        linesInfo.style.marginBottom = '6px';
+
+        var snippet = document.createElement('div');
+        snippet.textContent = res.matched_block.substring(0, 150) + (res.matched_block.length > 150 ? '...' : '');
+        snippet.style.fontSize = '11px';
+        snippet.style.color = 'var(--text-muted)';
+        snippet.style.lineHeight = '1.4';
+        snippet.style.display = '-webkit-box';
+        snippet.style.webkitLineClamp = '3';
+        snippet.style.webkitBoxOrient = 'vertical';
+        snippet.style.overflow = 'hidden';
+
+        item.appendChild(header);
+        item.appendChild(linesInfo);
+        item.appendChild(snippet);
+
+        item.addEventListener('click', function () {
+          Array.from(apiResultList.children).forEach(function (c) { c.classList.remove('active'); });
+          item.classList.add('active');
+          loadApiPreview(res);
+        });
+
+        apiResultList.appendChild(item);
+      });
+
+    }).catch(function (e) {
+      apiSearchBtn.textContent = '请求搜索';
+      apiSearchBtn.disabled = false;
+      apiResultList.innerHTML = '<div class="file-item" style="color: #ef4444;"><span>异常: ' + e + '</span></div>';
+    });
+  }
+
+  function loadApiPreview(res) {
+    var outputDir = el.outputDir.value || './output';
+    apiPreviewTitle.textContent = res.title || res.filename;
+    apiPreviewContent.innerHTML = '<div style="padding:10px;color:var(--text-muted);">正在注入抛锚点渲染...</div>';
+
+    invoke('preview_api_block', {
+      outputDir: outputDir,
+      filename: res.filename,
+      startLine: res.start_line,
+      endLine: res.end_line
+    }).then(function (html) {
+      apiPreviewContent.innerHTML = html;
+
+      // Now we find the anchors and highlight everything in between!
+      var startAnchor = apiPreviewContent.querySelector('#api-block-start');
+      var endAnchor = apiPreviewContent.querySelector('#api-block-end');
+
+      if (startAnchor && endAnchor) {
+        var range = document.createRange();
+        range.setStartAfter(startAnchor);
+        range.setEndBefore(endAnchor);
+
+        var treeWalker = document.createTreeWalker(
+          range.commonAncestorContainer,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function (node) {
+              if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
+              if (range.intersectsNode(node)) return NodeFilter.FILTER_ACCEPT;
+              return NodeFilter.FILTER_REJECT;
+            }
+          }
+        );
+
+        var nodesToWrap = [];
+        var currentNode;
+        while ((currentNode = treeWalker.nextNode())) {
+          nodesToWrap.push(currentNode);
+        }
+
+        var hasWrapped = nodesToWrap.length > 0;
+        nodesToWrap.forEach(function (n) {
+          var span = document.createElement('span');
+          span.className = 'api-sandbox-highlight';
+          span.style.backgroundColor = 'rgba(250, 204, 21, 0.3)';
+          span.style.borderBottom = '2px solid #f59e0b';
+          span.style.color = '#000';
+          n.parentNode.insertBefore(span, n);
+          span.appendChild(n);
+        });
+
+        if (hasWrapped) {
+          setTimeout(function () {
+            startAnchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+        }
+      }
+
+    }).catch(function (e) {
+      apiPreviewContent.innerHTML = '<div style="color:#ef4444;padding:10px;">读取正文失败: ' + e + '</div>';
+    });
+  }
+
+  if (apiSearchBtn) {
+    apiSearchBtn.addEventListener('click', performApiSearch);
+    apiSearchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') performApiSearch();
+    });
+  }
+
 }); // end DOMContentLoaded

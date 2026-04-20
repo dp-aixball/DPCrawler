@@ -26,6 +26,12 @@ except ImportError:
     _markitdown = None
     MARKITDOWN_AVAILABLE = False
 
+try:
+    import pymupdf4llm
+    PYMUPDF4LLM_AVAILABLE = True
+except ImportError:
+    PYMUPDF4LLM_AVAILABLE = False
+
 from config import CrawlerConfig
 from storage import StorageManager, CrawlResult
 from dataclasses import asdict
@@ -387,15 +393,20 @@ class WebCrawler:
                 print(f"  -> Skipped (unsupported binary: {content_type})")
                 return False
 
-            if MARKITDOWN_AVAILABLE:
-                # Use MarkItDown: write bytes to temp file, convert, delete
+            if MARKITDOWN_AVAILABLE or PYMUPDF4LLM_AVAILABLE:
+                # Use Advanced Parser: write bytes to temp file, convert, delete
                 try:
                     with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
                         tmp.write(response.content)
                         tmp_path = tmp.name
                     with ThreadPoolExecutor(max_workers=1) as conv_exec:
-                        content = conv_exec.submit(_markitdown.convert, tmp_path).result(timeout=60)
-                    content = content.text_content
+                        if file_ext == '.pdf' and PYMUPDF4LLM_AVAILABLE:
+                            content = conv_exec.submit(pymupdf4llm.to_markdown, tmp_path).result(timeout=120)
+                        elif MARKITDOWN_AVAILABLE:
+                            content = conv_exec.submit(_markitdown.convert, tmp_path).result(timeout=60)
+                            content = content.text_content
+                        else:
+                            raise Exception("No suitable advanced converter available for this format")
                     title = os.path.basename(parsed.path) or filename
                 except Exception as e:
                     if isinstance(e, TimeoutError):
@@ -799,11 +810,16 @@ class WebCrawler:
                     else:
                         content = text
 
-                elif MARKITDOWN_AVAILABLE:
-                    # Binary files: use MarkItDown (with fallback)
+                elif MARKITDOWN_AVAILABLE or PYMUPDF4LLM_AVAILABLE:
+                    # Binary files: use Advanced Parser (with fallback)
                     try:
-                        result = _markitdown.convert(fpath)
-                        content = result.text_content
+                        if fpath.lower().endswith('.pdf') and PYMUPDF4LLM_AVAILABLE:
+                            content = pymupdf4llm.to_markdown(fpath)
+                        elif MARKITDOWN_AVAILABLE:
+                            result = _markitdown.convert(fpath)
+                            content = result.text_content
+                        else:
+                            raise Exception("No advanced parser available")
                     except Exception:
                         # MarkItDown failed, try legacy fallback
                         converter_name = self.EXT_TO_CONVERTER.get(ext)

@@ -146,6 +146,7 @@
           <button class="tab active" data-tab="logs">日志</button>
           <button class="tab" data-tab="files">文件列表</button>
           <button class="tab" data-tab="result">结果</button>
+          <button class="tab" data-tab="api-sandbox">🧲 直查 API</button>
         </div>
 
         <div class="tab-content active" id="logs">
@@ -211,6 +212,43 @@
             <div class="result-card errors">
               <div class="count" id="errorCount">0</div>
               <div class="label">错误</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="api-sandbox">
+          <div class="files-panel">
+            <div class="file-list-wrapper" style="flex: 0 0 40%; display: flex; flex-direction: column; gap: 8px;">
+              <div class="search-container"
+                style="padding: 6px; border: 1px solid var(--border-glass); background: var(--bg-surface); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 6px;">
+                <input type="text" id="apiSearchInput" placeholder="输入超长段落测试文本..." autocomplete="off"
+                  style="flex: 1; padding: 6px 10px; border: 1px solid var(--border-color); background: var(--bg-body); font-size: 13px; outline: none; color: var(--text-main); border-radius: 4px;">
+                <div style="display: flex; gap: 8px;">
+                  <label style="font-size: 11px; align-items: center; display: flex; color: var(--text-muted)">Top K:
+                    <input type="number" id="apiTopK" value="5" min="1" max="50"
+                      style="width: 40px; margin-left: 4px; padding: 2px;">
+                  </label>
+                  <label
+                    style="font-size: 11px; align-items: center; display: flex; color: var(--text-muted)">Threshold:
+                    <input type="number" id="apiThreshold" value="0.5" step="0.1"
+                      style="width: 45px; margin-left: 4px; padding: 2px;">
+                  </label>
+                  <button id="apiSearchBtn" class="btn btn-primary btn-sm"
+                    style="margin-left: auto; padding: 2px 10px;">请求搜索</button>
+                </div>
+              </div>
+              <div class="file-list" id="apiResultList" style="flex: 1; height: 0; overflow-y: auto;">
+                <div class="file-item" style="color: var(--text-muted);"><span>等待查询...</span></div>
+              </div>
+            </div>
+            <div class="panel-resizer" id="apiPanelResizer"></div>
+            <div class="preview-panel">
+              <div class="preview-header">
+                <span id="apiPreviewTitle">检索结果全位块验证器</span>
+              </div>
+              <div class="preview-content" id="apiPreviewContent" style="position: relative;">
+                <div style="padding: 10px; font-size: 13px; color: var(--text-muted);">此处将整块呈现您的检索目标段落。</div>
+              </div>
             </div>
           </div>
         </div>

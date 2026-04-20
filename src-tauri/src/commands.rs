@@ -715,6 +715,81 @@ fn render_for_preview(content: &str, ext: &str) -> String {
     }
 }
 
+fn render_marked_markdown(content: &str, start_line: usize, end_line: usize) -> String {
+    let mut md_content = content;
+    if md_content.starts_with("---") {
+        if let Some(end_idx) = md_content[3..].find("\n---") {
+            md_content = &md_content[3 + end_idx + 4..];
+        }
+    } else if md_content.starts_with("```yaml") || md_content.starts_with("```ymal") {
+        if let Some(end_idx) = md_content[7..].find("\n```") {
+            md_content = &md_content[7 + end_idx + 4..];
+        }
+    }
+
+    let mut modified = String::with_capacity(md_content.len() + 200);
+    for (i, line) in md_content.lines().enumerate() {
+        let num = i + 1;
+        if num == start_line {
+            modified.push_str("\n<span id=\"api-block-start\" class=\"api-anchor\"></span>\n");
+        }
+        modified.push_str(line);
+        modified.push('\n');
+        if num == end_line {
+            modified.push_str("\n<span id=\"api-block-end\" class=\"api-anchor\"></span>\n");
+        }
+    }
+
+    use pulldown_cmark::{html, Options, Parser};
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(&modified, options);
+    let mut html_output = String::with_capacity(modified.len() * 2);
+    html::push_html(&mut html_output, parser);
+    html_output
+}
+
+#[tauri::command]
+pub fn preview_api_block(
+    output_dir: String,
+    filename: String,
+    start_line: usize,
+    end_line: usize,
+) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let parts: Vec<&str> = filename.splitn(2, '/').collect();
+    let (site_dir, file_base) = if parts.len() == 2 {
+        (parts[0], parts[1])
+    } else {
+        ("", filename.as_str())
+    };
+
+    let ext = ".md";
+    let docs_path = if site_dir.is_empty() {
+        base.join("docs").join(format!("{}{}", file_base, ext))
+    } else {
+        base.join(site_dir)
+            .join("docs")
+            .join(format!("{}{}", file_base, ext))
+    };
+
+    if docs_path.exists() {
+        let content = std::fs::read_to_string(&docs_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        return Ok(render_marked_markdown(&content, start_line, end_line));
+    }
+
+    let legacy_path = base.join(format!("{}{}", filename, ext));
+    if legacy_path.exists() {
+        let content = std::fs::read_to_string(&legacy_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        return Ok(render_marked_markdown(&content, start_line, end_line));
+    }
+
+    Err(format!("Markdown file not found: {}", filename))
+}
+
 #[tauri::command]
 pub fn list_crawled_sites(output_dir: String) -> Result<String, String> {
     let base = resolve_path(&output_dir);
@@ -1090,6 +1165,7 @@ pub async fn search_site_content(
                                     title,
                                     text.to_string(),
                                     url,
+                                    docs_path,
                                 );
                             }
                         }
@@ -1101,6 +1177,78 @@ pub async fn search_site_content(
 
     index.build();
     let results = index.search(&query, 50);
+
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn api_search(
+    output_dir: String,
+    site_name: String,
+    query: String,
+    top_k: usize,
+    threshold: f64,
+) -> Result<Vec<crate::search::SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut index = crate::search::SearchIndex::new();
+
+    if let Ok(site_index_json) = read_site_index(output_dir.clone(), site_name.clone()) {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&site_index_json) {
+            if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                for (full_name, meta) in tree {
+                    if let Ok(docs_path) =
+                        get_processed_file_path(output_dir.clone(), full_name.to_string())
+                    {
+                        if docs_path.ends_with(".md") {
+                            if let Ok(body) = std::fs::read_to_string(&docs_path) {
+                                let mut text = body.as_str();
+
+                                if text.starts_with("---") {
+                                    if let Some(end_idx) = text[3..].find("\n---") {
+                                        text = &text[3 + end_idx + 4..];
+                                    }
+                                } else if text.starts_with("```yaml") || text.starts_with("```ymal")
+                                {
+                                    if let Some(end_idx) = text[7..].find("\n```") {
+                                        text = &text[7 + end_idx + 4..];
+                                    }
+                                }
+
+                                let title = meta
+                                    .get("title")
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or(full_name.as_str())
+                                    .to_string();
+                                let mut url = String::new();
+                                if let Some(u) = meta.get("source_url").and_then(|u| u.as_str()) {
+                                    url = u.to_string();
+                                }
+
+                                index.add_document(
+                                    full_name.to_string(),
+                                    title,
+                                    text.to_string(),
+                                    url,
+                                    docs_path,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    index.build();
+    let mut results = index.search(&query, top_k);
+
+    // Apply threshold filtering
+    if threshold > 0.0 {
+        results.retain(|r| r.score >= threshold);
+    }
 
     Ok(results)
 }

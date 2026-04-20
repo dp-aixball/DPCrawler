@@ -47,7 +47,9 @@ pub fn run() {
             commands::get_processed_file_path,
             commands::get_raw_file_info,
             commands::copy_text_to_clipboard,
-            commands::search_site_content
+            commands::search_site_content,
+            commands::api_search,
+            commands::preview_api_block
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
