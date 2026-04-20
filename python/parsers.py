@@ -765,7 +765,47 @@ def extract_main_html(raw_html: str, title: str = "") -> str:
         doc = Document(raw_html)
         clean_html = doc.summary(html_partial=True)
         if clean_html and len(clean_html) > 100:
-            return f"<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body {{ font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}\n  img {{ max-width: 100%; height: auto; }}\n  table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}\n  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}\n</style>\n<title>{title}</title>\n</head>\n<body>\n{clean_html}\n</body>\n</html>"
+            date_str = ""
+            
+            # 引入项目自带的老式网页大标题扫描器（专门针对类 info-ctit 这种政务网站硬编码class）
+            better_title = extract_true_title(raw_html, title)
+            if better_title and len(better_title) > 3 and better_title != title:
+                title = better_title
+                
+            try:
+                import trafilatura
+                meta = trafilatura.extract_metadata(raw_html)
+                if meta:
+                    if getattr(meta, 'date', None):
+                        date_str = meta.date
+                    # Trafilatura 也是一重屏障
+                    tmp_title = getattr(meta, 'title', None)
+                    if tmp_title and len(tmp_title) > 3 and title == better_title:
+                        pass # 已被 extract_true_title 精准捕获则放弃 trafilatura
+                    elif tmp_title and len(tmp_title) > 3:
+                        title = tmp_title
+            except Exception:
+                pass
+                
+            header_html = f"<div class=\"rag-header\">\n  <h1 class=\"rag-title\">{title}</h1>\n"
+            if date_str:
+                header_html += f"  <div class=\"rag-meta\"><span>发布时间：{date_str}</span></div>\n"
+            header_html += "</div>\n"
+            
+            css = """
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.8; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #2c3e50; font-size: 16px; background-color: #fafafa; }
+img { max-width: 100%; height: auto; border-radius: 6px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+table { border-collapse: collapse; width: 100%; margin-bottom: 24px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+th, td { border: 1px solid #e2e8f0; padding: 12px 16px; text-align: left; }
+th { background-color: #f8fafc; font-weight: 600; color: #475569; }
+.rag-header { margin-bottom: 30px; text-align: center; border-bottom: 2px solid #edf2f7; padding-bottom: 24px; }
+.rag-title { font-size: 2em; font-weight: 700; color: #1e293b; margin-bottom: 12px; line-height: 1.4; }
+.rag-meta { font-size: 0.95em; color: #94a3b8; display: flex; justify-content: center; gap: 16px; }
+p { margin-bottom: 1.5em; text-indent: 2em; text-align: justify; }
+a { color: #3b82f6; text-decoration: none; }
+a:hover { text-decoration: underline; }
+"""
+            return f"<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>{css}</style>\n<title>{title}</title>\n</head>\n<body>\n{header_html}{clean_html}\n</body>\n</html>"
     except Exception:
         pass
 
