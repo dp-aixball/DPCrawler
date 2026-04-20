@@ -647,15 +647,19 @@ textarea:disabled {
 
 /* --- Government Document Markdown Aesthetic --- */
 .gov-doc {
-  font-family: "FangSong", "STFangsong", serif;
-  /* 仿宋正文 */
+  /* 全面覆盖大陆政务内网使用的各种仿宋变体，解决渲染发虚/乱码/变宋体问题 */
+  font-family: "方正仿宋_GBK", "方正仿宋简体", "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
+  /* 强制两端对齐，彻底解决右边不整齐的犬齿状排版 */
+  text-align: justify;
+  text-justify: inter-ideograph;
+  word-break: break-all;
   line-height: 2.0;
   color: #1a1a1a;
   padding: 10px 20px;
 }
 
 .gov-doc h1 {
-  font-family: "FZXiaoBiaoSong-B05S", "SimSun", serif;
+  font-family: "方正小标宋简体", "FZXiaoBiaoSong-B05S", "方正小标宋_GBK", "SimHei", "黑体", sans-serif;
   /* 大标题使用小标宋或宋体加粗 */
   text-align: center;
   font-size: 2.2em;

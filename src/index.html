@@ -112,6 +112,11 @@
             <option value="5">5 层</option>
             <option value="999">不限制</option>
           </select>
+          <label>特性增强</label>
+          <label class="checkbox-label" title="开启后，PDF将利用 GPU 彻底排版重建，大幅增加极客视觉效果，但将拖慢提取速度且非常耗费显卡！">
+            <input type="checkbox" id="useGpuMarker">
+            开启 GPU (Marker-PDF) 高保真解析
+          </label>
           <label>最早年度</label>
           <select id="minYear"></select>
         </div>
@@ -172,6 +177,10 @@
                 <div class="preview-actions" id="previewModeGroup" style="display:none; margin-left:auto; gap:4px;">
                   <button data-mode="md" class="btn btn-primary btn-sm"
                     style="padding:2px 8px; font-size:12px;">Markdown</button>
+                  <button data-mode="gov" class="btn btn-secondary btn-sm"
+                    style="padding:2px 8px; font-size:12px;">公文排版</button>
+                  <button data-mode="html" class="btn btn-secondary btn-sm"
+                    style="padding:2px 8px; font-size:12px;">高保真原版</button>
                   <button data-mode="meta" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:12px;">元数据
                     (Meta)</button>
                   <button data-mode="raw" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:12px;">源材料

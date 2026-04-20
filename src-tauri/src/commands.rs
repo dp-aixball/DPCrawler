@@ -612,6 +612,32 @@ pub fn read_file_content(output_dir: String, filename: String) -> Result<String,
 }
 
 #[tauri::command]
+pub fn read_html_view(output_dir: String, filename: String) -> Result<String, String> {
+    let base = resolve_path(&output_dir);
+    let parts: Vec<&str> = filename.splitn(2, '/').collect();
+    let (site_dir, file_base) = if parts.len() == 2 {
+        (parts[0], parts[1])
+    } else {
+        ("", filename.as_str())
+    };
+
+    let html_path = if site_dir.is_empty() {
+        base.join("html_views").join(format!("{}.html", file_base))
+    } else {
+        base.join(site_dir)
+            .join("html_views")
+            .join(format!("{}.html", file_base))
+    };
+
+    if html_path.exists() {
+        std::fs::read_to_string(&html_path)
+            .map_err(|e| format!("Failed to read html_view file: {}", e))
+    } else {
+        Err(format!("HTML View file not found: {:?}", html_path))
+    }
+}
+
+#[tauri::command]
 pub fn read_markdown_raw(output_dir: String, filename: String) -> Result<String, String> {
     let base = resolve_path(&output_dir);
     let parts: Vec<&str> = filename.splitn(2, '/').collect();

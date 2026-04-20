@@ -35,6 +35,7 @@ pub fn run() {
             commands::open_url,
             commands::read_file_content,
             commands::read_markdown_raw,
+            commands::read_html_view,
             commands::update_delay,
             commands::clear_output,
             commands::delete_site,

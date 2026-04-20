@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', function () {
     delay: document.getElementById('delay'),
     maxDepth: document.getElementById('maxDepth'),
     minYear: document.getElementById('minYear'),
+    useGpuMarker: document.getElementById('useGpuMarker'),
     startBtn: document.getElementById('startBtn'),
     stopBtn: document.getElementById('stopBtn'),
     preCrawlBtn: document.getElementById('preCrawlBtn'),
@@ -640,8 +641,10 @@ document.addEventListener('DOMContentLoaded', function () {
     // Paragraphs: double newline
     s = s.replace(/\n\n+/g, '</p><p>');
     s = '<p>' + s + '</p>';
-    // Single newlines to <br>
-    s = s.replace(/\n/g, '<br>');
+
+    // Completely remove single newline <br> replacement for Chinese Markdown
+    // because mechanical \n from PDF physics breaking ruins CSS `text-align: justify`
+    s = s.replace(/\n/g, ''); // Convert single newlines to nothing for CJK texts, letting browser wrap naturally
 
     return s;
   }
@@ -678,6 +681,20 @@ document.addEventListener('DOMContentLoaded', function () {
         }
       }, function (e) {
         el.previewContent.textContent = '\u8bfb\u53d6\u5931\u8d25: ' + e;
+      });
+    } else if (currentPreviewMode === 'html') {
+      if (el.rawIframe) el.rawIframe.style.display = 'block';
+      if (el.docxContainer) el.docxContainer.style.display = 'none';
+      if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
+      el.previewContent.style.display = 'none';
+
+      var outputDir = el.outputDir.value || './output';
+      invoke('read_html_view', { outputDir: outputDir, filename: filename }).then(function (html) {
+        el.rawIframe.srcdoc = html;
+      }).catch(function (e) {
+        el.rawIframe.style.display = 'none';
+        el.previewContent.style.display = 'block';
+        el.previewContent.textContent = '无法加载原版高保真视图: ' + e;
       });
     } else if (currentPreviewMode === 'meta') {
       if (el.rawIframe) el.rawIframe.style.display = 'none';
@@ -1006,6 +1023,7 @@ document.addEventListener('DOMContentLoaded', function () {
           if (cfg.delay !== undefined) el.delay.value = cfg.delay;
           // Fill min year
           if (cfg.min_year !== undefined) el.minYear.value = cfg.min_year;
+          if (cfg.use_gpu_marker !== undefined) el.useGpuMarker.checked = cfg.use_gpu_marker;
           // Fill content format
           if (cfg.content_format) el.contentFormat.value = cfg.content_format;
           // Fill file extensions checkboxes

@@ -28,10 +28,15 @@ except ImportError:
 
 try:
     import pymupdf4llm
-    from pdf_parser import extract_gov_pdf_to_markdown
+    from pdf_parser import extract_gov_pdf_to_markdown, extract_pdf_to_html
     PYMUPDF4LLM_AVAILABLE = True
 except ImportError:
     PYMUPDF4LLM_AVAILABLE = False
+
+try:
+    from marker_loader import extract_pdf_marker, MARKER_AVAILABLE
+except ImportError:
+    MARKER_AVAILABLE = False
 
 from config import CrawlerConfig
 from storage import StorageManager, CrawlResult
@@ -394,6 +399,7 @@ class WebCrawler:
                 print(f"  -> Skipped (unsupported binary: {content_type})")
                 return False
 
+            html_content = ""
             if MARKITDOWN_AVAILABLE or PYMUPDF4LLM_AVAILABLE:
                 # Use Advanced Parser: write bytes to temp file, convert, delete
                 try:
@@ -401,8 +407,15 @@ class WebCrawler:
                         tmp.write(response.content)
                         tmp_path = tmp.name
                     with ThreadPoolExecutor(max_workers=1) as conv_exec:
-                        if file_ext == '.pdf' and PYMUPDF4LLM_AVAILABLE:
-                            content = conv_exec.submit(extract_gov_pdf_to_markdown, tmp_path).result(timeout=120)
+                        if file_ext == '.pdf':
+                            # Highest fidelity GPU fallback, then specialized government regex wrapper
+                            if getattr(self.config, 'use_gpu_marker', False) and MARKER_AVAILABLE:
+                                content = conv_exec.submit(extract_pdf_marker, tmp_path).result(timeout=600)
+                            elif PYMUPDF4LLM_AVAILABLE:
+                                content = conv_exec.submit(extract_gov_pdf_to_markdown, tmp_path).result(timeout=120)
+                                html_content = conv_exec.submit(extract_pdf_to_html, tmp_path).result(timeout=120)
+                            else:
+                                raise Exception("No suitable advanced converter available for this format")
                         elif MARKITDOWN_AVAILABLE:
                             content = conv_exec.submit(_markitdown.convert, tmp_path).result(timeout=60)
                             content = content.text_content
@@ -475,6 +488,10 @@ class WebCrawler:
                 meta_yml = yaml.dump({"source_url": url, "title": title}, allow_unicode=True, default_flow_style=False).strip()
                 content = f"---\n{meta_yml}\n---\n\n{content}"
 
+            # Fallback to semantic node HTML as high-fidelity layer for non-PDF parsed web files
+            if locals().get('raw_html') and not locals().get('html_content'):
+                html_content = parsers.extract_main_html(raw_html, title)
+
             with self._lock:
                 status = self.storage.save_content(
                     filename=filename,
@@ -484,7 +501,8 @@ class WebCrawler:
                     content_type="text/markdown",
                     raw_html=raw_html,
                     raw_bytes=response.content,
-                    original_ext=url_ext if url_ext else ".html"
+                    original_ext=url_ext if url_ext else ".html",
+                    html_content=locals().get('html_content', '')
                 )
 
                 if status == "new":
@@ -814,8 +832,13 @@ class WebCrawler:
                 elif MARKITDOWN_AVAILABLE or PYMUPDF4LLM_AVAILABLE:
                     # Binary files: use Advanced Parser (with fallback)
                     try:
-                        if fpath.lower().endswith('.pdf') and PYMUPDF4LLM_AVAILABLE:
-                            content = extract_gov_pdf_to_markdown(fpath)
+                        if fpath.lower().endswith('.pdf'):
+                            if getattr(self.config, 'use_gpu_marker', False) and MARKER_AVAILABLE:
+                                content = extract_pdf_marker(fpath)
+                            elif PYMUPDF4LLM_AVAILABLE:
+                                content = extract_gov_pdf_to_markdown(fpath)
+                            else:
+                                raise Exception("No advanced parser available")
                         elif MARKITDOWN_AVAILABLE:
                             result = _markitdown.convert(fpath)
                             content = result.text_content

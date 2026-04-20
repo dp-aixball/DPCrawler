@@ -756,3 +756,33 @@ def extract_title(soup: BeautifulSoup) -> str:
         return title.get_text(strip=True)
 
     return "Untitled"
+
+def extract_main_html(raw_html: str, title: str = "") -> str:
+    """Extract semantic main content HTML from raw webpage DOM"""
+    soup = BeautifulSoup(raw_html, "html.parser")
+    
+    # Remove unwanted tags universally
+    for tag in soup.find_all(['script', 'style', 'nav', 'footer', 'header', 'aside', 'noscript', 'iframe']):
+        tag.decompose()
+        
+    candidates = soup.find_all(['article', 'main'])
+    
+    if not candidates:
+        for div in soup.find_all('div'):
+            classes = " ".join(div.get('class', [])).lower()
+            idx = div.get('id', '').lower()
+            if re.search(r'content|article|main|body|txt|zoom', classes) or \
+               re.search(r'content|article|main|body|txt|zoom', idx):
+                candidates.append(div)
+                
+    if not candidates:
+        divs = soup.find_all('div')
+        if divs:
+            candidates.append(max(divs, key=lambda d: len(d.get_text(strip=True))))
+            
+    if candidates:
+        best_node = max(candidates, key=lambda c: len(c.get_text(strip=True)))
+        return f"<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body {{ font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}\n  img {{ max-width: 100%; height: auto; }}\n  table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}\n  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}\n</style>\n<title>{title}</title>\n</head>\n<body>\n{best_node.prettify()}\n</body>\n</html>"
+    
+    body = soup.find('body')
+    return str(body) if body else raw_html

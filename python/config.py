@@ -22,6 +22,7 @@ class CrawlerConfig:
     recursive: bool = True
     max_depth: int = 3
     min_year: int = 0  # 0 means no filtering
+    use_gpu_marker: bool = False  # Set to True to use Marker-PDF model on GPU
 
     @classmethod
     def from_yaml(cls, path: str) -> "CrawlerConfig":
@@ -46,6 +47,7 @@ class CrawlerConfig:
             recursive=crawler_data.get("recursive", True),
             max_depth=crawler_data.get("max_depth", 3),
             min_year=crawler_data.get("min_year", 0),
+            use_gpu_marker=crawler_data.get("use_gpu_marker", False),
         )
 
     def to_yaml(self, path: str):
@@ -64,6 +66,7 @@ class CrawlerConfig:
                 "recursive": self.recursive,
                 "max_depth": self.max_depth,
                 "min_year": self.min_year,
+                "use_gpu_marker": self.use_gpu_marker,
             }
         }
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)

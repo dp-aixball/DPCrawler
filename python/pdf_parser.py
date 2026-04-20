@@ -73,7 +73,9 @@ def extract_gov_pdf_to_markdown(pdf_path: str) -> str:
             
             blocks_data.append({
                 "items": texts,
-                "size": max_row_size
+                "size": max_row_size,
+                "x0": min([item["x0"] for item in row]) if row else 0.0,
+                "y0": min([item["y0"] for item in row]) if row else 0.0
             })
 
     if not blocks_data:
@@ -83,52 +85,76 @@ def extract_gov_pdf_to_markdown(pdf_path: str) -> str:
     size_counts = Counter(all_sizes)
     base_size = size_counts.most_common(1)[0][0] if size_counts else 10.0
     
-    # Classify blocks into Markdown with Markdown Table generation
-    md_lines = ["\n<div class=\"gov-doc\">\n\n"]
+    # Baseline X0 for paragraphs to determine indents
+    body_x0s = [b["x0"] for b in blocks_data if b["size"] <= base_size + 1.0]
+    base_x0 = Counter(body_x0s).most_common(1)[0][0] if body_x0s else 50.0
+    
+    md_lines = []
     
     in_table = False
     table_cols = 0
-    
+    para_buffer = []
+
+    def flush_para():
+        if para_buffer:
+            md_lines.append("\u3000\u3000" + "".join(para_buffer) + "\n\n")
+            para_buffer.clear()
+            
     for i, b in enumerate(blocks_data):
         items = b["items"]
         size = b["size"]
+        x0 = b["x0"]
         
-        # Table detection heuristic:
-        # Only true tables usually have 3 or more columns.
         is_multi_col = len(items) >= 3
         
         if is_multi_col:
+            flush_para()
             if not in_table:
                 in_table = True
                 table_cols = len(items)
-                # print Header
-                md_lines.append("| " + " | ".join(items) + " |")
-                # print Separator
-                md_lines.append("|" + "|".join(["---"] * table_cols) + "|")
+                md_lines.append("| " + " | ".join(items) + " |\n")
+                md_lines.append("|" + "|".join(["---"] * table_cols) + "|\n")
             else:
-                # pad or truncate items to match table_cols
                 if len(items) < table_cols:
                     items.extend([""] * (table_cols - len(items)))
-                md_lines.append("| " + " | ".join(items[:table_cols]) + " |")
+                md_lines.append("| " + " | ".join(items[:table_cols]) + " |\n")
             continue
         
         if in_table:
             in_table = False
             md_lines.append("\n")
             
-        # If len == 2, it's a hanging indent or spaced title. Join with full-width spaces.
         text = "\u3000\u3000".join(items)
         
-        # Heuristic rules:
+        # Heuristic Header Rules
         if size > base_size + 4.0:
-            md_lines.append(f"# {text}\n")
+            flush_para()
+            md_lines.append(f"# {text}\n\n")
         elif size > base_size + 1.5:
-            md_lines.append(f"## {text}\n")
+            flush_para()
+            md_lines.append(f"## {text}\n\n")
         elif size > base_size + 0.1:
-            md_lines.append(f"### {text}\n")
+            flush_para()
+            md_lines.append(f"### {text}\n\n")
         else:
-            # Paragraph
-            md_lines.append(f"{text}\n")
+            # Paragraph Block Merger
+            # Check indentation: if x0 is noticeably pushed in, or sudden vertical gap
+            if x0 > base_x0 + 15.0 or (i > 0 and blocks_data[i-1]["y0"] < b["y0"] and abs(blocks_data[i-1]["y0"] - b["y0"]) > 25.0):
+                flush_para()
+            
+            # Flush on explicit list enumeration patterns typical in government schemas
+            if re.match(r'^(第[一二三四五六七八九十百千万]+[章节条]|[0-9]+[．\.、]|一、|二、|三、|四、|五、|六、|七、|八、|九、|十、|（[一二三四五六七八九十]+）|\([0-9]+\))', text):
+                flush_para()
+                
+            para_buffer.append(text)
+            
+    flush_para()
+    return "".join(md_lines).strip() + "\n"
 
-    md_lines.append("\n</div>\n")
-    return "\n".join(md_lines)
+def extract_pdf_to_html(pdf_path: str) -> str:
+    """Extracts raw physically positioned HTML from a PDF using PyMuPDF to absolute-fidelity"""
+    doc = fitz.open(pdf_path)
+    html_out = []
+    for page in doc:
+        html_out.append(page.get_text("html"))
+    return "\n".join(html_out)

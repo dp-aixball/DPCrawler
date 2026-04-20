@@ -94,9 +94,10 @@ class StorageManager:
         content_type: str = "text/html", 
         raw_html: str = "",
         raw_bytes: bytes = None,
-        original_ext: str = ""
+        original_ext: str = "",
+        html_content: str = ""
     ) -> Optional[str]:
-        """Save content and its metadata, returns file status: 'new', 'updated', 'unchanged', or None on error"""
+        """Save content and its metadata, returns file status: 'new', 'updated', 'unchanged', or None on error. Optionally dumps html_content to html_views."""
         try:
             docs_dir = os.path.join(self.output_dir, "docs")
             meta_dir = os.path.join(self.output_dir, "meta")
@@ -152,6 +153,14 @@ class StorageManager:
                 raw_path = os.path.join(raw_dir, f"{base_filename}.html")
                 with open(raw_path, "w", encoding="utf-8") as tf:
                     tf.write(raw_html)
+
+            # Save clean high-fidelity HTML for frontend UI previews
+            if html_content:
+                html_views_dir = os.path.join(self.output_dir, "html_views")
+                os.makedirs(html_views_dir, exist_ok=True)
+                html_path = os.path.join(html_views_dir, f"{base_filename}.html")
+                with open(html_path, "w", encoding="utf-8") as hf:
+                    hf.write(html_content)
 
             # Update index
             was_new = base_filename not in self.index
