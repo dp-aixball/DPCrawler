@@ -154,8 +154,15 @@
 
         <div class="tab-content" id="files">
           <div class="files-panel">
-            <div class="file-list" id="fileList">
-              <div class="file-item"><span>暂无文件</span></div>
+            <div class="file-list-wrapper" style="flex: 0 0 40%; display: flex; flex-direction: column; gap: 8px;">
+              <div class="search-container" id="searchContainer"
+                style="padding: 6px; border: 1px solid var(--border-glass); background: var(--bg-surface); border-radius: var(--radius-md); display: flex;">
+                <input type="text" id="searchInput" placeholder="搜索本站文本 (BM25打分)..." autocomplete="off"
+                  style="flex: 1; padding: 6px 10px; border: none; background: transparent; font-size: 13px; outline: none; color: var(--text-main);">
+              </div>
+              <div class="file-list" id="fileList" style="flex: 1; height: 0;">
+                <div class="file-item"><span>暂无文件</span></div>
+              </div>
             </div>
             <div class="panel-resizer" id="panelResizer"></div>
             <div class="preview-panel" id="previewPanel">

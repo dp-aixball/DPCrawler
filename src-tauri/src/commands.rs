@@ -1038,3 +1038,69 @@ pub fn copy_text_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(),
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn search_site_content(
+    output_dir: String,
+    site_name: String,
+    query: String,
+) -> Result<Vec<crate::search::SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut index = crate::search::SearchIndex::new();
+
+    // Leverage read_site_index to robustly fetch file tree (handles index.json fallback natively)
+    if let Ok(site_index_json) = read_site_index(output_dir.clone(), site_name.clone()) {
+        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&site_index_json) {
+            if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
+                for (full_name, meta) in tree {
+                    if let Ok(docs_path) =
+                        get_processed_file_path(output_dir.clone(), full_name.to_string())
+                    {
+                        if docs_path.ends_with(".md") {
+                            if let Ok(body) = std::fs::read_to_string(&docs_path) {
+                                let mut text = body.as_str();
+
+                                // Strip YAML frontmatter
+                                if text.starts_with("---") {
+                                    if let Some(end_idx) = text[3..].find("\n---") {
+                                        text = &text[3 + end_idx + 4..];
+                                    }
+                                } else if text.starts_with("```yaml") || text.starts_with("```ymal")
+                                {
+                                    if let Some(end_idx) = text[7..].find("\n```") {
+                                        text = &text[7 + end_idx + 4..];
+                                    }
+                                }
+
+                                let title = meta
+                                    .get("title")
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or(full_name.as_str())
+                                    .to_string();
+                                let mut url = String::new();
+                                if let Some(u) = meta.get("source_url").and_then(|u| u.as_str()) {
+                                    url = u.to_string();
+                                }
+
+                                index.add_document(
+                                    full_name.to_string(),
+                                    title,
+                                    text.to_string(),
+                                    url,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    index.build();
+    let results = index.search(&query, 50);
+
+    Ok(results)
+}

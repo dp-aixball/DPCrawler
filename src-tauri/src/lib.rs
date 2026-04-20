@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod fs_utils;
 pub mod process;
+pub mod search;
 use process::disable_webkit_cache;
 use process::CRAWLER_PID;
 use std::sync::atomic::Ordering;
@@ -45,7 +46,8 @@ pub fn run() {
             commands::get_absolute_path,
             commands::get_processed_file_path,
             commands::get_raw_file_info,
-            commands::copy_text_to_clipboard
+            commands::copy_text_to_clipboard,
+            commands::search_site_content
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
