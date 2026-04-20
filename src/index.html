@@ -150,6 +150,12 @@
               <div class="preview-content" id="previewContent">单击左侧文件即可预览内容</div>
               <iframe id="rawIframe"
                 style="width:100%; height:calc(100% - 35px); border:none; display:none; background:#fff;"></iframe>
+              <div id="docxContainer"
+                style="width:100%; height:calc(100% - 35px); border:none; display:none; overflow:auto; background:#fff; box-sizing:border-box;">
+              </div>
+              <div id="xlsxContainer"
+                style="width:100%; height:calc(100% - 35px); border:none; display:none; overflow:auto; background:#fff; box-sizing:border-box; padding:10px;">
+              </div>
             </div>
           </div>
         </div>
@@ -190,6 +196,9 @@
     </footer>
   </div>
 
+  <script src="lib/jszip.min.js"></script>
+  <script src="lib/docx-preview.min.js"></script>
+  <script src="lib/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 

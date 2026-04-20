@@ -83,6 +83,8 @@ document.addEventListener('DOMContentLoaded', function () {
     previewContent: document.getElementById('previewContent'),
     previewModeBtn: document.getElementById('previewModeBtn'),
     rawIframe: document.getElementById('rawIframe'),
+    docxContainer: document.getElementById('docxContainer'),
+    xlsxContainer: document.getElementById('xlsxContainer'),
     siteList: document.getElementById('siteList'),
     themeSelect: document.getElementById('themeSelect')
   };
@@ -479,6 +481,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (currentPreviewMode === 'md') {
       if (el.rawIframe) el.rawIframe.style.display = 'none';
+      if (el.docxContainer) el.docxContainer.style.display = 'none';
+      if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
       el.previewContent.style.display = 'block';
       el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
       var outputDir = el.outputDir.value || './output';
@@ -495,11 +499,58 @@ document.addEventListener('DOMContentLoaded', function () {
         var outputDir = el.outputDir.value || './output';
         invoke('get_raw_file_info', { outputDir: outputDir, filename: filename }).then(function (info) {
           if (info.is_text) {
+            if (el.docxContainer) el.docxContainer.style.display = 'none';
+            if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
+            el.rawIframe.style.display = 'block';
             el.rawIframe.srcdoc = info.content;
           } else if (info.is_pdf && info.base64) {
+            if (el.docxContainer) el.docxContainer.style.display = 'none';
+            if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
+            el.rawIframe.style.display = 'block';
             el.rawIframe.removeAttribute('srcdoc');
             el.rawIframe.src = 'data:application/pdf;base64,' + info.base64;
+          } else if (info.is_docx && info.base64 && window.docx) {
+            el.rawIframe.style.display = 'none';
+            if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
+            if (el.docxContainer) {
+              el.docxContainer.style.display = 'block';
+              el.docxContainer.innerHTML = '<div style="padding:20px;text-align:center;">\u6b63\u5728\u6e32\u67d3 DOCX \u6587\u6863...</div>';
+              setTimeout(function () {
+                var binaryString = atob(info.base64);
+                var len = binaryString.length;
+                var bytes = new Uint8Array(len);
+                for (var i = 0; i < len; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                var blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+                window.docx.renderAsync(blob, el.docxContainer).catch(function (e) {
+                  el.docxContainer.innerHTML = '<div style="padding:20px;color:red;text-align:center;">DOCX\u6e32\u67d3\u5931\u8d25: ' + e + '</div>';
+                });
+              }, 50);
+            }
+          } else if (info.is_xlsx && info.base64 && window.XLSX) {
+            el.rawIframe.style.display = 'none';
+            if (el.docxContainer) el.docxContainer.style.display = 'none';
+            if (el.xlsxContainer) {
+              el.xlsxContainer.style.display = 'block';
+              el.xlsxContainer.innerHTML = '<div style="padding:20px;text-align:center;">\u6b63\u5728\u89e3\u6790 Excel \u8868\u683c...</div>';
+              setTimeout(function () {
+                try {
+                  var binaryString = atob(info.base64);
+                  var wb = window.XLSX.read(binaryString, { type: 'binary' });
+                  var ws = wb.Sheets[wb.SheetNames[0]];
+                  var htmlstr = window.XLSX.utils.sheet_to_html(ws);
+                  el.xlsxContainer.innerHTML = '<div style="font-family:sans-serif; margin-bottom:10px;"><b>\u5de5\u4f5c\u8868: ' + wb.SheetNames[0] + '</b></div>' +
+                    '<style>#xlsxContainer table {border-collapse:collapse; font-size:13px;} #xlsxContainer td, #xlsxContainer th {border:1px solid #ccc; padding:4px 8px;}</style>' + htmlstr;
+                } catch (e) {
+                  el.xlsxContainer.innerHTML = '<div style="padding:20px;color:red;text-align:center;">Excel \u89e3\u6790\u5931\u8d25: ' + e + '</div>';
+                }
+              }, 50);
+            }
           } else {
+            if (el.docxContainer) el.docxContainer.style.display = 'none';
+            if (el.xlsxContainer) el.xlsxContainer.style.display = 'none';
+            el.rawIframe.style.display = 'block';
             var safePath = info.path.replace(/\\/g, '\\\\');
             var html = '<div style="font-family:sans-serif; text-align:center; padding: 50px;">' +
               '<h3>\u8be5\u6587\u4ef6\u7c7b\u578b (.' + info.ext + ') \u65e0\u6cd5\u76f4\u63a5\u5185\u5d4c\u9884\u89c8</h3>' +

@@ -890,6 +890,8 @@ pub fn get_raw_file_info(
                     if name.starts_with(file_base) {
                         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                         let is_pdf = ext == "pdf";
+                        let is_docx = ext == "docx";
+                        let is_xlsx = ext == "xlsx" || ext == "xls";
                         let is_text = ext == "html"
                             || ext == "htm"
                             || ext == "txt"
@@ -903,7 +905,7 @@ pub fn get_raw_file_info(
                         if is_text {
                             content =
                                 std::fs::read_to_string(&path).unwrap_or_else(|_| "".to_string());
-                        } else if is_pdf {
+                        } else if is_pdf || is_docx || is_xlsx {
                             if let Ok(bytes) = std::fs::read(&path) {
                                 use base64::Engine;
                                 base64_data =
@@ -916,6 +918,8 @@ pub fn get_raw_file_info(
                             "ext": ext,
                             "is_text": is_text,
                             "is_pdf": is_pdf,
+                            "is_docx": is_docx,
+                            "is_xlsx": is_xlsx,
                             "content": content,
                             "base64": base64_data
                         }));
