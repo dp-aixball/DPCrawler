@@ -152,7 +152,41 @@ def extract_gov_pdf_to_markdown(pdf_path: str) -> str:
     return "".join(md_lines).strip() + "\n"
 
 def extract_pdf_to_html(pdf_path: str) -> str:
-    """Extracts raw physically positioned HTML from a PDF using PyMuPDF to absolute-fidelity"""
+    """Extracts pixel-perfect HTML from a PDF using pdf2htmlEX, gracefully falling back to PyMuPDF."""
+    import os
+    import tempfile
+    import subprocess
+    
+    pdf2htmlex_bin = os.path.join(os.path.dirname(__file__), "pdf2htmlEX")
+    
+    if os.path.exists(pdf2htmlex_bin) and os.access(pdf2htmlex_bin, os.X_OK):
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                pdf_name = os.path.basename(pdf_path)
+                out_html_name = f"{pdf_name}.html"
+                out_html = os.path.join(temp_dir, out_html_name)
+                
+                cmd = [
+                    pdf2htmlex_bin,
+                    "--zoom", "1.3",
+                    "--embed", "CFIJO", 
+                    "--dest-dir", temp_dir,
+                    pdf_path,
+                    out_html_name
+                ]
+                
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                with open(out_html, "r", encoding="utf-8") as f:
+                    raw_html = f.read()
+                    
+                # Fix blank screen bug in iframe srcdoc by overriding lazy-rendering scripts
+                patch_css = "<style>.pc{display:block !important;} .pf{margin-bottom:20px !important;} #page-container{position:relative !important; height:auto !important; overflow:visible !important;}</style>\n</body>"
+                return raw_html.replace("</body>", patch_css)
+        except Exception as e:
+            print(f"  -> pdf2htmlEX failed ({e}), falling back to PyMuPDF")
+
+    # Fallback to PyMuPDF
     doc = fitz.open(pdf_path)
     html_out = []
     for page in doc:

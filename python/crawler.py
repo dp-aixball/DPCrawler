@@ -466,6 +466,22 @@ class WebCrawler:
                     print(f"  -> Skipped (unsupported binary: {content_type})")
                     return False
 
+            if not html_content:
+                try:
+                    import io
+                    if file_ext in ['.doc', '.docx']:
+                        import mammoth
+                        with io.BytesIO(response.content) as b:
+                            res = mammoth.convert_to_html(b)
+                            html_content = f"<!DOCTYPE html>\n<html><head><meta charset='utf-8'><style>body {{ font-family: -apple-system, sans-serif; padding: 20px; line-height: 1.6; color: #333; }} table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }} td, th {{ border: 1px solid #ddd; padding: 8px; }} img {{ max-width: 100%; height: auto; }}</style></head><body>{res.value}</body></html>"
+                    elif file_ext in ['.xls', '.xlsx']:
+                        import pandas as pd
+                        df = pd.read_excel(io.BytesIO(response.content), header=None)
+                        html_table = df.to_html(index=False, header=False, na_rep='', border=1)
+                        html_content = f"<!DOCTYPE html>\n<html><head><meta charset='utf-8'><style>body {{ font-family: -apple-system, sans-serif; padding: 20px; color: #333; }} table {{ border-collapse: collapse; width: 100%; font-size: 14px; text-align: left; }} td, th {{ border: 1px solid #ddd; padding: 8px; }}</style></head><body>{html_table}</body></html>"
+                except Exception as e:
+                    print(f"  -> HTML View secondary generation failed for {file_ext}: {e}")
+
         elif content_type in self.PLAINTEXT_TYPES or url_ext in self.PLAINTEXT_EXTENSIONS:
             text = response.text.strip()
             title = os.path.basename(parsed.path) or filename
