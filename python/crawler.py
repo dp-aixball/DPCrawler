@@ -373,7 +373,8 @@ class WebCrawler:
             title = parsers.extract_title(soup)
             raw_html = response.text
             
-            extracted = parsers.universal_html_extract(response.text, url)
+            html_content = parsers.extract_main_html(raw_html, title)
+            extracted = parsers.universal_html_extract(html_content, url)
             content = extracted["content"]
             metadata = extracted.get("metadata", {})
             metadata["source_url"] = url
