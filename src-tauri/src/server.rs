@@ -76,11 +76,15 @@ async fn file_handler(
         .cloned()
         .unwrap_or_else(|| "./output".to_string());
     let base = crate::fs_utils::resolve_path(&output_dir);
-    // 增加对 headless_client.html 测试探针文件的白名单放行（从根目录加载而不是 output_dir）
-    let full_path = if path == "headless_client.html" {
-        crate::fs_utils::resolve_path(".").join(&path)
+
+    // 安全剥离任何由双斜杠导致的前缀绝对路径符，避免 Path::join 时发生根节点覆盖
+    let safe_path = path.trim_start_matches('/');
+
+    // 增加对 dpc_search_server.html 测试探针文件的白名单放行（从根目录加载而不是 output_dir）
+    let full_path = if safe_path == "dpc_search_server.html" {
+        crate::fs_utils::resolve_path(".").join(safe_path)
     } else {
-        base.join(&path)
+        base.join(safe_path)
     };
 
     if let Ok(bytes) = tokio::fs::read(&full_path).await {
@@ -238,6 +242,23 @@ document.addEventListener("DOMContentLoaded", function() {{
     }
 }
 
+async fn search_page_handler() -> Response {
+    let full_path = crate::fs_utils::resolve_path(".").join("dpc_search_server.html");
+    if let Ok(bytes) = tokio::fs::read(&full_path).await {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(axum::body::Body::from(bytes))
+            .unwrap()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            format!("File not found: {}", full_path.display()),
+        )
+            .into_response()
+    }
+}
+
 pub async fn run_server(port: u16) {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -247,6 +268,7 @@ pub async fn run_server(port: u16) {
     let shared_state = Arc::new(AppState { port });
 
     let app = Router::new()
+        .route("/search", get(search_page_handler))
         // API 路由
         .route("/api/v1/search", post(api_search_handler))
         // 动态读取静态路由，规避 ServeDir 固定绑定 data_dir 导致二级域名或跨绝对路径的 404 断层

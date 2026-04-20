@@ -695,10 +695,15 @@ document.addEventListener('DOMContentLoaded', function () {
       el.previewContent.textContent = '\u52a0\u8f7d\u4e2d...';
 
       var file_base = filename;
-      if (file_base.indexOf('/') !== -1) { file_base = file_base.split('/')[1]; }
+      var current_site = activeSite || '';
+      if (file_base.indexOf('/') !== -1) {
+        var parts = file_base.split('/');
+        current_site = parts[0];
+        file_base = parts[1];
+      }
       var outDir = el.outputDir.value || './output';
       var params = '?output_dir=' + encodeURIComponent(outDir);
-      var mdUrl = 'http://127.0.0.1:18088/files/' + (activeSite || '') + '/docs/' + file_base + '.md' + params;
+      var mdUrl = 'http://127.0.0.1:18088/files/' + current_site + '/docs/' + file_base + '.md' + params;
 
       fetch(mdUrl).then(function (res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -718,10 +723,15 @@ document.addEventListener('DOMContentLoaded', function () {
       el.previewContent.style.display = 'none';
 
       var file_base = filename;
-      if (file_base.indexOf('/') !== -1) { file_base = file_base.split('/')[1]; }
+      var current_site = activeSite || '';
+      if (file_base.indexOf('/') !== -1) {
+        var parts = file_base.split('/');
+        current_site = parts[0];
+        file_base = parts[1];
+      }
       var outDir = el.outputDir.value || './output';
       var params = '?output_dir=' + encodeURIComponent(outDir);
-      var htmlUrl = 'http://127.0.0.1:18088/files/' + (activeSite || '') + '/html_views/' + file_base + '.html' + params;
+      var htmlUrl = 'http://127.0.0.1:18088/files/' + current_site + '/html_views/' + file_base + '.html' + params;
 
       el.rawIframe.removeAttribute('srcdoc');
       el.rawIframe.src = htmlUrl;

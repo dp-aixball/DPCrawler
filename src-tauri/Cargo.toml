@@ -1,9 +1,10 @@
 [package]
 name = "dpcrawler"
-version = "2.0.0"
+version = "2.1.0"
 description = "A Tauri App"
 authors = [""]
 edition = "2021"
+default-run = "dpcrawler"
 
 [lib]
 name = "dpcrawler_lib"

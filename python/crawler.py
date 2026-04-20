@@ -833,7 +833,10 @@ class WebCrawler:
                     soup = BeautifulSoup(html_text, 'html.parser')
                     title = parsers.extract_title(soup)
                     
-                    extracted = parsers.universal_html_extract(html_text, source_url)
+                    # 生成清洗过的高保真 HTML
+                    html_content = parsers.extract_main_html(html_text, title)
+                    
+                    extracted = parsers.universal_html_extract(html_content, source_url)
                     content = extracted["content"]
                     metadata = extracted.get("metadata", {})
                     metadata["source_url"] = source_url
@@ -912,7 +915,8 @@ class WebCrawler:
                         source_url=source_url,
                         title=title,
                         content_type='text/markdown',
-                        raw_html=None
+                        raw_html=None,
+                        html_content=locals().get('html_content', '')
                     )
                     if status == 'new':
                         full_name = self.current_subdir + '/' + filename
