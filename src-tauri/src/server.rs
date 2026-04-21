@@ -109,7 +109,15 @@ document.addEventListener("DOMContentLoaded", function() {{
         var prefix = cleanMd.substring(0, Math.min(20, cleanMd.length));
         var suffix = cleanMd.substring(Math.max(0, cleanMd.length - 20));
 
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+            acceptNode: function(node) {
+                var p = node.parentNode;
+                if (!p) return NodeFilter.FILTER_ACCEPT;
+                var tag = p.tagName.toLowerCase();
+                if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        }, false);
         var nodes = [];
         var fullText = "";
         var n;
@@ -137,11 +145,16 @@ document.addEventListener("DOMContentLoaded", function() {{
                 range.setStartBefore(startAnchor);
                 range.setEndAfter(endAnchor);
                 var hw = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT, {{
-                    acceptNode: function(node) {{
+                    acceptNode: function(node) {
                         if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
+                        var p = node.parentNode;
+                        if (p) {
+                            var tag = p.tagName.toLowerCase();
+                            if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                        }
                         if (range.intersectsNode(node)) return NodeFilter.FILTER_ACCEPT;
                         return NodeFilter.FILTER_REJECT;
-                    }}
+                    }
                 }}, false);
                 var nodesToWrap = [];
                 var hn;
@@ -181,7 +194,15 @@ document.addEventListener("DOMContentLoaded", function() {{
         var term = decodeURIComponent(escape(atob("{}")));
         if (!term) return;
         var words = term.split(/\s+/).filter(w => w.trim());
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+            acceptNode: function(node) {
+                var p = node.parentNode;
+                if (!p) return NodeFilter.FILTER_ACCEPT;
+                var tag = p.tagName.toLowerCase();
+                if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        }, false);
         var nodes = [];
         var n;
         while(n = walker.nextNode()) nodes.push(n);
