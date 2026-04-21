@@ -2,11 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
-use crate::fs_utils::{data_dir, dev_project_root, is_dev_mode, resolve_path};
+use crate::fs_utils::{data_dir, dev_project_root, is_portable_or_dev_mode, resolve_path};
 use crate::process::{is_pid_alive, kill_pid, CRAWLER_PID};
-use std::path::PathBuf;
 
 /// Find the crawler executable.
 
@@ -37,7 +36,7 @@ pub struct PreCrawlProgress {
 
 pub fn find_crawler() -> Result<(String, Vec<String>), String> {
     // Dev mode: prefer venv/python so code changes take effect immediately
-    if is_dev_mode() {
+    if is_portable_or_dev_mode() {
         let root = dev_project_root();
         let crawler_file = root.join("python").join("crawler.py");
         if crawler_file.exists() {
@@ -753,8 +752,8 @@ fn render_marked_markdown(content: &str, start_line: usize, end_line: usize) -> 
 pub fn preview_api_block(
     output_dir: String,
     filename: String,
-    start_line: usize,
-    end_line: usize,
+    _start_line: usize,
+    _end_line: usize,
 ) -> Result<String, String> {
     let base = resolve_path(&output_dir);
     let parts: Vec<&str> = filename.splitn(2, '/').collect();

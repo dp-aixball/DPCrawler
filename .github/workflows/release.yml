@@ -130,6 +130,11 @@ jobs:
             cp src-tauri/target/${{ matrix.target }}/release/dpc_search_server dpc_search_server_pkg/
           fi
           cp dpc_search_server.html dpc_search_server_pkg/
+          if [ -f "README_DEPLOY.md" ]; then
+            cp README_DEPLOY.md dpc_search_server_pkg/
+          elif [ -f "../README_DEPLOY.md" ]; then
+            cp ../README_DEPLOY.md dpc_search_server_pkg/
+          fi
           
           # Create zip
           if [ "$RUNNER_OS" == "Windows" ]; then

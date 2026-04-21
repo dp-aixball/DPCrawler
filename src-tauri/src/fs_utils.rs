@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-/// Detect if running from a development project directory
-/// (has python/crawler.py), or installed system-wide.
-pub fn is_dev_mode() -> bool {
+/// Detect if running from a development project directory,
+/// OR deployed as a standalone portable package in the same folder.
+pub fn is_portable_or_dev_mode() -> bool {
     let dev_root = dev_project_root();
     dev_root.join("python").join("crawler.py").exists()
+        || dev_root.join("dpc_search_server.html").exists()
 }
 
 /// Development project root (CWD-based, for `cargo tauri dev`)
@@ -20,7 +21,7 @@ pub fn dev_project_root() -> PathBuf {
 /// Data directory for config/output (works both dev and installed)
 /// Dev: project root; Installed: ~/.config/dpcrawler/ or %APPDATA%/dpcrawler/
 pub fn data_dir() -> PathBuf {
-    if is_dev_mode() {
+    if is_portable_or_dev_mode() {
         dev_project_root()
     } else {
         let dir = dirs::data_dir()

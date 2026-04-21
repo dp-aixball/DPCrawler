@@ -24,6 +24,37 @@ struct AppState {
     port: u16,
 }
 
+#[derive(Deserialize)]
+pub struct ListSitesQuery {
+    pub output_dir: Option<String>,
+}
+
+async fn list_sites_handler(
+    axum::extract::Query(payload): axum::extract::Query<ListSitesQuery>,
+) -> impl IntoResponse {
+    let output_dir = payload
+        .output_dir
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "output".to_string());
+
+    let base = crate::fs_utils::resolve_path(&output_dir);
+    let mut sites = vec![];
+
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for entry in entries.flatten() {
+            if let Ok(ft) = entry.file_type() {
+                if ft.is_dir() {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        sites.push(name);
+                    }
+                }
+            }
+        }
+    }
+
+    Json(sites)
+}
+
 // RESTful API 处理器
 async fn api_search_handler(
     State(state): State<Arc<AppState>>,
@@ -104,20 +135,34 @@ document.addEventListener("DOMContentLoaded", function() {{
     try {{
         var term = decodeURIComponent(escape(atob("{}")));
         if (!term) return;
-        var cleanMd = term.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+        
+        // --- CRISIS FIX ---
+        // Markdown 格式文本中包含了 [Title](url) 的链接形式
+        // 若直接移除所有标点，会导致把 'httpwww...' 留下来，从而在原生 HTML 树的 TextNode 中死活匹配不到
+        // 因此必须在做纯净化提取前把 Markdown URL 形式剥离并保留链接显示字
+        var dmd = term.replace(/!\[[^\]]*\]\([^\)]*\)/g, '');
+        dmd = dmd.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+        dmd = dmd.replace(/<(https?:\/\/[^>]+)>/g, '');
+        
+        var cleanMd = dmd.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
         if (cleanMd.length < 5) return;
-        var prefix = cleanMd.substring(0, Math.min(20, cleanMd.length));
-        var suffix = cleanMd.substring(Math.max(0, cleanMd.length - 20));
+        
+        // 若原文块非常短，动态缩短特征头尾的采样长度，避免错进错出
+        var sampleLen = Math.min(20, Math.floor(cleanMd.length / 2));
+        if (sampleLen < 5) sampleLen = cleanMd.length;
+        
+        var prefix = cleanMd.substring(0, sampleLen);
+        var suffix = cleanMd.substring(Math.max(0, cleanMd.length - sampleLen));
 
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-            acceptNode: function(node) {
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {{
+            acceptNode: function(node) {{
                 var p = node.parentNode;
                 if (!p) return NodeFilter.FILTER_ACCEPT;
                 var tag = p.tagName.toLowerCase();
                 if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
-            }
-        }, false);
+            }}
+        }}, false);
         var nodes = [];
         var fullText = "";
         var n;
@@ -129,9 +174,30 @@ document.addEventListener("DOMContentLoaded", function() {{
             fullText += val;
         }}
 
-        var startIndex = fullText.indexOf(prefix);
-        var endIndex = fullText.indexOf(suffix, startIndex);
-        endIndex = endIndex !== -1 ? endIndex + suffix.length : -1;
+        var startIndex = -1;
+        var endIndex = -1;
+        
+        // 滑动窗口寻找有效前缀，以包容被 html2text 引入但在 body 中不存在的 title 等头部元素
+        for (var offset = 0; offset <= cleanMd.length - sampleLen; offset += 5) {{
+            var testPrefix = cleanMd.substring(offset, offset + sampleLen);
+            var found = fullText.indexOf(testPrefix);
+            if (found !== -1) {{
+                startIndex = found;
+                break;
+            }}
+        }}
+        
+        // 从后往前滑动寻找有效后缀，以包容底部无关或缺失内容
+        if (startIndex !== -1) {{
+            for (var offset = cleanMd.length; offset >= sampleLen; offset -= 5) {{
+                var testSuffix = cleanMd.substring(offset - sampleLen, offset);
+                var foundEnd = fullText.lastIndexOf(testSuffix);
+                if (foundEnd !== -1 && foundEnd >= startIndex) {{
+                    endIndex = foundEnd + testSuffix.length;
+                    break;
+                }}
+            }}
+        }}
 
         if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {{
             var startAnchor = null;
@@ -145,16 +211,16 @@ document.addEventListener("DOMContentLoaded", function() {{
                 range.setStartBefore(startAnchor);
                 range.setEndAfter(endAnchor);
                 var hw = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT, {{
-                    acceptNode: function(node) {
+                    acceptNode: function(node) {{
                         if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
                         var p = node.parentNode;
-                        if (p) {
+                        if (p) {{
                             var tag = p.tagName.toLowerCase();
                             if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
-                        }
+                        }}
                         if (range.intersectsNode(node)) return NodeFilter.FILTER_ACCEPT;
                         return NodeFilter.FILTER_REJECT;
-                    }
+                    }}
                 }}, false);
                 var nodesToWrap = [];
                 var hn;
@@ -193,16 +259,26 @@ document.addEventListener("DOMContentLoaded", function() {{
     try {{
         var term = decodeURIComponent(escape(atob("{}")));
         if (!term) return;
-        var words = term.split(/\s+/).filter(w => w.trim());
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-            acceptNode: function(node) {
+        var words = [];
+        if (typeof Intl !== 'undefined' && Intl.Segmenter) {{
+            var segmenter = new Intl.Segmenter('zh-CN', {{ granularity: 'word' }});
+            for (var seg of segmenter.segment(term)) {{
+                if (seg.isWordLike && seg.segment.length > 1) words.push(seg.segment);
+            }}
+        }} else {{
+            words = term.split(/[\s,，.。?？!！;；、]/).filter(w => w.trim());
+        }}
+        if (words.length === 0) words = [term.trim()];
+        words.sort((a, b) => b.length - a.length);
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {{
+            acceptNode: function(node) {{
                 var p = node.parentNode;
                 if (!p) return NodeFilter.FILTER_ACCEPT;
                 var tag = p.tagName.toLowerCase();
                 if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
-            }
-        }, false);
+            }}
+        }}, false);
         var nodes = [];
         var n;
         while(n = walker.nextNode()) nodes.push(n);
@@ -292,6 +368,7 @@ pub async fn run_server(port: u16) {
         .route("/search", get(search_page_handler))
         // API 路由
         .route("/api/v1/search", post(api_search_handler))
+        .route("/api/v1/sites", get(list_sites_handler))
         // 动态读取静态路由，规避 ServeDir 固定绑定 data_dir 导致二级域名或跨绝对路径的 404 断层
         .route("/files/*path", get(file_handler))
         .layer(cors)

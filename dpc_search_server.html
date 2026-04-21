@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DPCrawler RAG Core Tester</title>
+    <title>DPAI Knowledge Base Search</title>
     <style>
         :root {
             --bg: #0f172a;
@@ -35,12 +35,12 @@
 
         .header {
             text-align: center;
-            margin-bottom: 3rem;
+            margin-bottom: 1.5rem;
             animation: fadeIn 0.8s ease-out;
         }
 
         .header h1 {
-            font-size: 2.5rem;
+            font-size: 2rem;
             font-weight: 800;
             background: linear-gradient(to right, #60a5fa, #c084fc);
             -webkit-background-clip: text;
@@ -60,9 +60,9 @@
             -webkit-backdrop-filter: blur(16px);
             border: 1px solid var(--border);
             border-radius: 1rem;
-            padding: 2rem;
+            padding: 1.5rem;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             animation: slideUp 0.6s ease-out;
         }
 
@@ -79,22 +79,32 @@
         }
 
         label {
+            display: block;
             font-size: 0.875rem;
             font-weight: 500;
             color: var(--text-muted);
             letter-spacing: 0.05em;
             text-transform: uppercase;
+            text-align: center;
         }
 
         input {
+            width: 100%;
+            height: 48px;
+            box-sizing: border-box;
             background: rgba(15, 23, 42, 0.5);
             border: 1px solid var(--border);
             border-radius: 0.5rem;
-            padding: 0.75rem 1rem;
+            padding: 0 1rem;
             color: var(--text);
             font-size: 1rem;
             transition: all 0.2s;
             outline: none;
+            text-align: center;
+        }
+
+        input[type="number"] {
+            text-align: center;
         }
 
         input:focus {
@@ -197,6 +207,8 @@
 
         .actions {
             display: flex;
+            flex-wrap: wrap;
+            /* 允许在狭窄的手机屏幕上自动换行 */
             gap: 1rem;
             margin-top: 1rem;
             padding-top: 1rem;
@@ -256,46 +268,113 @@
             font-style: italic;
             display: none;
         }
+
+        /* 专门针对移动端（手机）的极压缩布局适配 */
+        @media (max-width: 600px) {
+            body {
+                padding: 1rem 0.5rem;
+                /* 减小整屏白边，为手机争取更多可用空间 */
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .glass-panel {
+                padding: 1.25rem;
+                margin-bottom: 1rem;
+            }
+
+            .result-card {
+                padding: 1rem;
+            }
+
+            .actions {
+                gap: 0.75rem;
+            }
+
+            #params-grid {
+                grid-template-columns: 1fr 1fr !important;
+            }
+
+            #params-grid>div:nth-child(2) {
+                grid-column: 1 / -1;
+            }
+        }
+
+        .select-wrapper {
+            position: relative;
+        }
+
+        .select-wrapper select {
+            width: 100%;
+            height: 48px;
+            box-sizing: border-box;
+            padding: 0 1rem;
+            border-radius: 0.5rem;
+            background: rgba(15, 23, 42, 0.4);
+            color: var(--text);
+            border: 1px solid var(--border);
+            font-size: 1rem;
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            text-align: center;
+            text-align-last: center;
+        }
+
+        .select-wrapper::after {
+            content: '▼';
+            font-size: 0.75rem;
+            color: #94a3b8;
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+        }
     </style>
 </head>
 
 <body>
     <div class="container">
         <div class="header">
-            <h1>RAG Core Engine</h1>
-            <p><span class="status-dot"></span> Headless HTTP Server `http://127.0.0.1:18088`</p>
+            <h1>DPAI Knowledge Base Search</h1>
         </div>
 
         <div class="glass-panel">
             <form id="searchForm">
-                <div class="form-grid">
-                    <div class="input-group">
-                        <label>Output Dir</label>
-                        <input type="text" id="output_dir" value="output" placeholder="默认留空读取 Tauri 数据目录">
-                    </div>
+                <div id="params-grid"
+                    style="display: grid; grid-template-columns: minmax(180px, 1fr) 90px 140px; gap: 1.5rem; margin-bottom: 1rem; align-items: end;">
+                    <input type="hidden" id="output_dir" value="">
                     <div class="input-group">
                         <label>Site Name</label>
-                        <input type="text" id="site_name" value="www.bjeea.cn" placeholder="如 baidu_com 等">
-                    </div>
-                </div>
-                <br>
-                <div class="form-grid">
-                    <div class="input-group" style="grid-column: 1 / -1;">
-                        <label>Search Query</label>
-                        <input type="text" id="query" required placeholder="输入你要找的关键词或长句"
-                            style="font-size: 1.25rem; padding: 1rem;">
+                        <div class="select-wrapper">
+                            <select id="site_name">
+                                <option value="example.com">example.com</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="input-group">
                         <label>Top K</label>
                         <input type="number" id="top_k" value="10" min="1" max="100">
                     </div>
                     <div class="input-group">
-                        <label>Threshold (0.0 - 1.0)</label>
+                        <label>Threshold</label>
                         <input type="number" id="threshold" value="0.1" step="0.05" min="0" max="1">
                     </div>
                 </div>
 
-                <button type="submit">
+                <div class="input-group" style="margin-bottom: 1.5rem; align-items: center;">
+                    <label style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.5rem; text-align: center;">Search
+                        Query</label>
+                    <input type="text" id="query" required placeholder="输入你要找的关键词或长句"
+                        style="font-size: 1.2rem; padding: 1rem; width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.7); text-align: center;">
+                </div>
+
+                <button type="submit" style="margin-top: 0; padding: 0.85rem 2rem;">
                     <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"
                         xmlns="http://www.w3.org/2000/svg">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -340,6 +419,48 @@
         const modalContent = document.getElementById('modalContent');
         const previewIframe = document.getElementById('previewIframe');
         const modalTitle = document.getElementById('modalTitle');
+
+        async function fetchSites() {
+            const output_dir = document.getElementById('output_dir').value;
+            try {
+                // 不传 output_dir 将强制使用系统级或 Portable Default (当前目录的 output/)
+                const response = await fetch('/api/v1/sites');
+                if (response.ok) {
+                    const sites = await response.json();
+                    const selectEl = document.getElementById('site_name');
+                    selectEl.innerHTML = '';
+                    if (sites.length === 0) {
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = '暂无已爬取数据';
+                        selectEl.appendChild(option);
+                    } else {
+                        sites.forEach(site => {
+                            const option = document.createElement('option');
+                            option.value = site;
+                            option.textContent = site;
+                            selectEl.appendChild(option);
+                        });
+
+                        const lastSite = localStorage.getItem('dpc_last_site_name');
+                        if (lastSite && sites.includes(lastSite)) {
+                            selectEl.value = lastSite;
+                        } else if (sites.length > 0) {
+                            selectEl.value = sites[0];
+                            localStorage.setItem('dpc_last_site_name', sites[0]);
+                        }
+
+                        selectEl.addEventListener('change', (e) => {
+                            localStorage.setItem('dpc_last_site_name', e.target.value);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to fetch sites dropdown", e);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', fetchSites);
 
         document.getElementById('closeModal').addEventListener('click', () => {
             modal.style.opacity = '0';
@@ -485,7 +606,7 @@
                                 </a>
                                 <a href="#" class="btn-link action-view-word">
                                     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                    核心词定位
+                                    核心词高亮
                                 </a>
                                 <a href="${res.md_download_url}" target="_blank" class="btn-link">
                                     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
@@ -504,7 +625,11 @@
 
                         card.querySelector('.action-view-word').addEventListener('click', (ev) => {
                             ev.preventDefault();
-                            openPreview(res.html_view_url, (res.title || res.filename) + " - 核心词定位");
+                            const queryTerm = document.getElementById('query').value;
+                            const hlUrl = res.html_view_url +
+                                (res.html_view_url.includes('?') ? '&' : '?') +
+                                "highlight=" + encodeURIComponent(queryTerm);
+                            openPreview(hlUrl, (res.title || res.filename) + " - 核心词高亮");
                         });
 
                         resultsContainer.appendChild(card);
