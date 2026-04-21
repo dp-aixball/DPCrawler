@@ -25,7 +25,7 @@ pub struct SearchResult {
 
 impl SearchResult {
     // 为当前请求的端口填充 CDN 链接
-    pub fn inject_urls(&mut self, port: u16, site_name: &str, output_dir: &str, query: &str) {
+    pub fn inject_urls(&mut self, site_name: &str, output_dir: &str, query: &str) {
         let file_base = if self.filename.contains('/') {
             self.filename
                 .split_once('/')

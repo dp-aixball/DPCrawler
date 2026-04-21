@@ -57,7 +57,7 @@ async fn list_sites_handler(
 
 // RESTful API 处理器
 async fn api_search_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<Vec<crate::search::SearchResult>>, StatusCode> {
     let output_dir = payload
@@ -87,7 +87,7 @@ async fn api_search_handler(
                 let _base_url = payload.site_name.clone();
                 // Because `filename` in result usually looks like "SiteName/Filename" from file_tree.
                 // Wait, search.rs has access to `filename`. Let's just fix the URLs in search.rs.
-                result.inject_urls(state.port, &payload.site_name, &output_dir, &payload.query);
+                result.inject_urls(&payload.site_name, &output_dir, &payload.query);
             }
             Ok(Json(results))
         }
