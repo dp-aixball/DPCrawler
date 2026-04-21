@@ -5,11 +5,20 @@ DPCrawler 底层检索引擎已经完成**核心重构**。目前实现了“前
 
 ---
 
-## 1. 核心检索接口：`POST /api/v1/search`
+## 1. 站点查询接口：`GET /api/v1/search`（废弃，已迁移为独立端点）
+> **注意**：请使用 `GET /api/v1/sites` 获取全量知识库目录（支持无依赖零配置的便携版部署发现）。
+
+### 1.1 获取站点列表: `GET /api/v1/sites`
+查询当前服务器（或默认 portable `output` 根目录）下已挂载的所有独立爬虫站点数据集名称。第三方 UI 可借助该接口生成下拉菜单。
+* **返回格式**：`["SiteA", "SiteB", "Dp_Gov"]`
+
+---
+
+## 2. 核心检索接口：`POST /api/v1/search`
 
 作为分布式知识库检索入口，允许外部 Agent 跨网调用。
 
-### 1.1 输入参数 (Request Payload)
+### 2.1 输入参数 (Request Payload)
 
 Content-Type: `application/json`
 
@@ -23,7 +32,7 @@ Content-Type: `application/json`
 
 <br>
 
-### 1.2 输出结果 (Response Array)
+### 2.2 输出结果 (Response Array)
 
 返回一个包含多个 `SearchResult` 对象的 JSON 数组。由于跨服务器调用无法读取宿主机的物理盘，系统不再返回无意义的绝对路径，而是直接给出来自内置 CDN 的 **文件下载与访问 URL**。
 
@@ -42,7 +51,7 @@ Content-Type: `application/json`
     
     // 【跨服核心】通过 DPCrawler 内置静态服务器（或 Nginx）暴露的相对路径链接
     "md_download_url": "/files/SiteA/docs/2026年报名简章.md?output_dir=...", // LLM 用来即时拉取万字全文的接口
-    "html_view_url": "/files/SiteA/html_views/2026年报名简章.html?output_dir=...&highlight=...", // 前端 UI 直接塞入 Iframe 画布的高保真远端视觉链接
+    "html_view_url": "/files/SiteA/html_views/2026年报名简章.html?output_dir=...&highlight=...", // 前端 UI 直接塞入 Iframe 画布的高保真远端视觉链接（底层支持包含标点空格的全自然语句智能切割）
     "html_block_view_url": "/files/SiteA/html_views/2026年报名简章.html?output_dir=...&highlight_block=..." // 锚定具体块片段的高亮链接
   }
 ]
@@ -50,17 +59,17 @@ Content-Type: `application/json`
 
 ---
 
-## 2. 远端渲染高保真回显规范（DOM 跨服同步染色定位）
+## 3. 远端渲染高保真回显规范（DOM 跨服同步染色定位）
 
 当第三方业务流（无论是在云端、微信小程序还是远程网页）接收到上述 JSON 后，可以直接借助自带的 CDN 取到 HTML 以供极美展示。
 
 为了保留 API 测试特有的“黄屏聚焦”，跨服前端需使用**跨模态寻址对齐策略**：
 
 1. **Iframe 挂载**：直接将响应体中的 `html_view_url` 赋给原生 `<iframe src="...">`，利用浏览器内置引擎无损下载并渲染含数十万绝对定位元素的 `pdf2htmlEX` 页面。
-2. **锚点提取**：取出 JSON 中的 `matched_block`，截取前后极度纯净的 20 个可见字符（去除空格、符号及特殊富文本标点），构成 `prefix` 和 `suffix`。
-3. **脱水碰撞与涂色（TreeWalker Range）**：
-    等 iframe `onload` 加载完毕，在前端执行一层探测脚本。将 HTML `<body>` 拍扁为纯文本流，通过 `indexOf(prefix)` 和 `indexOf(suffix, 起点)` 精确获得文本物理起点和终点！
-    拉取 Web `Range` API，利用 `TreeWalker` 把框定范围内的所有远程物理节点强行包裹底色层（例如 `<span style="background-color:rgba(250,204,21,0.4)">`）。
+2. **锚点提取**：取出 JSON 中的 `matched_block` 或 `query` 词，底层引擎自动调用了 Chromium 原生的 `Intl.Segmenter` API 拦截处理大段人类语言指令，将其碎为高亮核心阵列；对区段高亮则自动剥离外部链接形式以剔除杂交影响。
+3. **脱水双向滑窗对齐（TreeWalker Range）**：
+    等 iframe `onload` 加载完毕，在前端执行探测脚本。将 HTML `<body>` 拍扁为纯文本流，不再死板地寻找开头前20字（可能遭遇 Markdown 附带 `<title>` 表头失效的场景），而是改用 **双向滑窗碰撞算法** 跳过一切头图、无用导航与冗余表头，强行精确咬合目标文本的物理生存位置点！
+    拉取 Web `Range` API，利用 `TreeWalker` 把框定范围内的所有远程物理节点强行包裹底色层，并实现屏幕至焦点的平稳全自动滚动 `scrollIntoView()`。
 
 通过这种 **CDN 派发文件 + 客户端动态脱水渲染** 的跨服架构：
 *   **后端（Crawler）** 完全免去了跨网传输百兆 HTML 的巨大成本负担。

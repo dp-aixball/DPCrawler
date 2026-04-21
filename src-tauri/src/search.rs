@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -148,7 +149,7 @@ impl SearchIndex {
 
         let mut scores: Vec<(usize, f64)> = self
             .docs
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, doc)| {
                 let mut score = 0.0;
@@ -407,25 +408,41 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
     (best_start + 1, best_end + 1, block)
 }
 
-pub async fn perform_api_search(
-    output_dir: String,
-    site_name: String,
-    query: String,
-    top_k: usize,
-    threshold: f64,
-) -> Result<Vec<SearchResult>, String> {
-    if query.trim().is_empty() {
-        return Ok(Vec::new());
+static INDEX_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, (std::time::SystemTime, std::sync::Arc<SearchIndex>)>,
+    >,
+> = std::sync::OnceLock::new();
+
+fn get_cached_index(output_dir: &str, site_name: &str) -> std::sync::Arc<SearchIndex> {
+    let cache_key = format!("{}:{}", output_dir, site_name);
+
+    let index_file_path = crate::fs_utils::resolve_path(output_dir)
+        .join(site_name)
+        .join("index.json");
+    let current_mod_time = std::fs::metadata(&index_file_path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+    {
+        let cache = INDEX_CACHE
+            .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+            .lock()
+            .unwrap();
+        if let Some((mod_time, idx)) = cache.get(&cache_key) {
+            if *mod_time == current_mod_time {
+                return idx.clone();
+            }
+        }
     }
 
     let mut index = SearchIndex::new();
-
-    if let Ok(site_index_json) = crate::fs_utils::read_site_index_core(&output_dir, &site_name) {
+    if let Ok(site_index_json) = crate::fs_utils::read_site_index_core(output_dir, site_name) {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&site_index_json) {
             if let Some(tree) = data.get("file_tree").and_then(|t| t.as_object()) {
                 for (full_name, meta) in tree {
                     if let Ok(docs_path) = crate::fs_utils::get_processed_file_path_core(
-                        &output_dir,
+                        output_dir,
                         full_name.as_str(),
                     ) {
                         if docs_path.ends_with(".md") {
@@ -469,7 +486,37 @@ pub async fn perform_api_search(
     }
 
     index.build();
-    let mut results = index.search(&query, top_k);
+    let arc_index = std::sync::Arc::new(index);
+
+    {
+        let mut cache = INDEX_CACHE
+            .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+            .lock()
+            .unwrap();
+        cache.insert(cache_key, (current_mod_time, arc_index.clone()));
+    }
+
+    arc_index
+}
+
+pub async fn perform_api_search(
+    output_dir: String,
+    site_name: String,
+    query: String,
+    top_k: usize,
+    threshold: f64,
+) -> Result<Vec<SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let out_dir = output_dir.clone();
+    let s_name = site_name.clone();
+    let arc_index = tokio::task::spawn_blocking(move || get_cached_index(&out_dir, &s_name))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut results = arc_index.search(&query, top_k);
 
     if threshold > 0.0 {
         results.retain(|r| r.score >= threshold);
