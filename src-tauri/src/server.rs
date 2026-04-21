@@ -231,8 +231,10 @@ document.addEventListener("DOMContentLoaded", function() {{
                     seen[tIdx] = true;
                     // 使用词汇长度作为权重，越长的特征词越能决定真实位置！
                     score += uniqueTokens[tIdx].length;
+                    // 核心修复：只在“首次发现新的特征词”时扩展高亮边界。
+                    // 绝不让几百字外的重复废词把高亮框强行拉长好几倍！
+                    actualEnd = Math.max(actualEnd, tokenPositions[j].end);
                 }}
-                actualEnd = Math.max(actualEnd, tokenPositions[j].end);
             }}
 
             if (score > maxScore) {{
@@ -247,33 +249,25 @@ document.addEventListener("DOMContentLoaded", function() {{
             }}
         }}
 
-        var bestRanges = [];
-        for (var i = 0; i < tokenPositions.length; i++) {{
-            if (tokenPositions[i].start >= bestWindowStart && tokenPositions[i].end <= bestWindowEnd) {{
-                bestRanges.push(tokenPositions[i]);
-            }}
-        }}
-
-        // 直接采用精准点对点染色
-        if (bestRanges.length > 0) {{
+        // 恢复“整块高亮”的视觉体验：将密度聚类找到的真实边界 [bestWindowStart, bestWindowEnd] 之间的所有文本节点全部高亮，避免像斑马线一样断断续续。
+        if (bestWindowStart !== -1 && bestWindowEnd !== -1) {{
             var startAnchor = null;
-            bestRanges.forEach(function(r) {{
-                for (var i = 0; i < nodes.length; i++) {{
-                    var nObj = nodes[i];
-                    if (nObj.start < r.end && nObj.end > r.start) {{
-                        if (!startAnchor) startAnchor = nObj.node;
-                        if (!nObj.wrapped) {{
-                            var span = document.createElement('span');
-                            span.className = 'api-sandbox-highlight';
-                            span.style.backgroundColor = 'rgba(250, 204, 21, 0.4)';
-                            span.style.color = '#000';
-                            nObj.node.parentNode.insertBefore(span, nObj.node);
-                            span.appendChild(nObj.node);
-                            nObj.wrapped = true;
-                        }}
+            for (var i = 0; i < nodes.length; i++) {{
+                var nObj = nodes[i];
+                // 只要该文本节点与最佳窗口有交集，就予以高亮
+                if (nObj.start < bestWindowEnd && nObj.end > bestWindowStart) {{
+                    if (!startAnchor) startAnchor = nObj.node;
+                    if (!nObj.wrapped) {{
+                        var span = document.createElement('span');
+                        span.className = 'api-sandbox-highlight';
+                        span.style.backgroundColor = 'rgba(250, 204, 21, 0.4)';
+                        span.style.color = '#000';
+                        nObj.node.parentNode.insertBefore(span, nObj.node);
+                        span.appendChild(nObj.node);
+                        nObj.wrapped = true;
                     }}
                 }}
-            }});
+            }}
             setTimeout(() => {{
                 if (startAnchor && startAnchor.parentElement) {{
                     startAnchor.parentElement.scrollIntoView({{behavior: 'smooth', block: 'center'}});
