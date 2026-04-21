@@ -123,6 +123,17 @@ async fn file_handler(
         let mut body_bytes = bytes;
 
         if path.ends_with(".html") || path.ends_with(".htm") {
+            if let Ok(html_str) = String::from_utf8(body_bytes.clone()) {
+                let version_info = format!(
+                    "v{} (Build: {}, Hash: {})",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("BUILD_TIME"),
+                    env!("GIT_COMMIT_HASH")
+                );
+                let injected_html = html_str.replace("{{DPC_VERSION_INFO}}", &version_info);
+                body_bytes = injected_html.into_bytes();
+            }
+
             if let Some(highlight_block) = query.get("highlight_block") {
                 if let Ok(html_str) = String::from_utf8(body_bytes.clone()) {
                     use base64::Engine;
