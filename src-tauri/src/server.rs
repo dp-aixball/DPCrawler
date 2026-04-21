@@ -138,21 +138,35 @@ document.addEventListener("DOMContentLoaded", function() {{
         
         // --- CRISIS FIX ---
         // Markdown 格式文本中包含了 [Title](url) 的链接形式
-        // 若直接移除所有标点，会导致把 'httpwww...' 留下来，从而在原生 HTML 树的 TextNode 中死活匹配不到
-        // 因此必须在做纯净化提取前把 Markdown URL 形式剥离并保留链接显示字
         var dmd = term.replace(/!\[[^\]]*\]\([^\)]*\)/g, '');
         dmd = dmd.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
         dmd = dmd.replace(/<(https?:\/\/[^>]+)>/g, '');
         
-        var cleanMd = dmd.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
-        if (cleanMd.length < 5) return;
+        // 针对表格等复杂结构，按空白符和表格分隔符进行词汇级切分
+        var rawTokens = dmd.split(/[\s\|\n]+/);
+        var tokens = [];
+        rawTokens.forEach(function(t) {{
+            var ct = t.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+            // 核心修复：PDF 的文本流常常会在长句中间被页眉、隐形换行等杂音硬生生切断！
+            // 如果不拆分，几十个字的中文段落（无空格）在 indexOf 时只要碰到一个杂音就会全军覆没得 0 分。
+            // 因此必须将过长的 Token 切块（N-gram），保证容错率。
+            if (ct.length > 8) {{
+                for (var i = 0; i < ct.length; i += 5) {{
+                    var chunk = ct.substring(i, i + 5);
+                    if (chunk.length >= 2) tokens.push(chunk);
+                }}
+            }} else if (ct.length >= 2) {{
+                tokens.push(ct);
+            }}
+        }});
         
-        // 若原文块非常短，动态缩短特征头尾的采样长度，避免错进错出
-        var sampleLen = Math.min(20, Math.floor(cleanMd.length / 2));
-        if (sampleLen < 5) sampleLen = cleanMd.length;
-        
-        var prefix = cleanMd.substring(0, sampleLen);
-        var suffix = cleanMd.substring(Math.max(0, cleanMd.length - sampleLen));
+        if (tokens.length === 0) {{
+            rawTokens.forEach(function(t) {{
+                var ct = t.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+                if (ct.length > 0) tokens.push(ct);
+            }});
+        }}
+        if (tokens.length === 0) return;
 
         var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {{
             acceptNode: function(node) {{
@@ -174,71 +188,97 @@ document.addEventListener("DOMContentLoaded", function() {{
             fullText += val;
         }}
 
-        var startIndex = -1;
-        var endIndex = -1;
-        
-        // 滑动窗口寻找有效前缀，以包容被 html2text 引入但在 body 中不存在的 title 等头部元素
-        for (var offset = 0; offset <= cleanMd.length - sampleLen; offset += 5) {{
-            var testPrefix = cleanMd.substring(offset, offset + sampleLen);
-            var found = fullText.indexOf(testPrefix);
-            if (found !== -1) {{
-                startIndex = found;
-                break;
+        // --- 核心修复：无序聚类算法 ---
+        var tokenPositions = [];
+        var uniqueTokens = [];
+        tokens.forEach(function(t) {{
+            if (uniqueTokens.indexOf(t) === -1) uniqueTokens.push(t);
+        }});
+
+        for(var i = 0; i < uniqueTokens.length; i++) {{
+            var t = uniqueTokens[i];
+            var searchPos = 0;
+            while(true) {{
+                var pos = fullText.indexOf(t, searchPos);
+                if(pos === -1) break;
+                tokenPositions.push({{ tIdx: i, start: pos, end: pos + t.length }});
+                searchPos = pos + 1;
             }}
         }}
-        
-        // 从后往前滑动寻找有效后缀，以包容底部无关或缺失内容
-        if (startIndex !== -1) {{
-            for (var offset = cleanMd.length; offset >= sampleLen; offset -= 5) {{
-                var testSuffix = cleanMd.substring(offset - sampleLen, offset);
-                var foundEnd = fullText.lastIndexOf(testSuffix);
-                if (foundEnd !== -1 && foundEnd >= startIndex) {{
-                    endIndex = foundEnd + testSuffix.length;
-                    break;
+
+        if (tokenPositions.length === 0) return;
+
+        tokenPositions.sort(function(a, b) {{ return a.start - b.start; }});
+
+        var W = Math.max(1500, uniqueTokens.join('').length * 4);
+        var maxScore = -1;
+        var bestWindowStart = -1;
+        var bestWindowEnd = -1;
+
+        for (var i = 0; i < tokenPositions.length; i++) {{
+            var windowStart = tokenPositions[i].start;
+            var windowEnd = windowStart + W;
+            
+            var seen = {{}};
+            var score = 0;
+            var actualEnd = windowStart;
+
+            for (var j = i; j < tokenPositions.length; j++) {{
+                if (tokenPositions[j].start > windowEnd) break;
+                
+                var tIdx = tokenPositions[j].tIdx;
+                if (!seen[tIdx]) {{
+                    seen[tIdx] = true;
+                    // 使用词汇长度作为权重，越长的特征词越能决定真实位置！
+                    score += uniqueTokens[tIdx].length;
+                }}
+                actualEnd = Math.max(actualEnd, tokenPositions[j].end);
+            }}
+
+            if (score > maxScore) {{
+                maxScore = score;
+                bestWindowStart = windowStart;
+                bestWindowEnd = actualEnd;
+            }} else if (score === maxScore && maxScore > 0) {{
+                if ((actualEnd - windowStart) < (bestWindowEnd - bestWindowStart)) {{
+                    bestWindowStart = windowStart;
+                    bestWindowEnd = actualEnd;
                 }}
             }}
         }}
 
-        if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {{
+        var bestRanges = [];
+        for (var i = 0; i < tokenPositions.length; i++) {{
+            if (tokenPositions[i].start >= bestWindowStart && tokenPositions[i].end <= bestWindowEnd) {{
+                bestRanges.push(tokenPositions[i]);
+            }}
+        }}
+
+        // 直接采用精准点对点染色
+        if (bestRanges.length > 0) {{
             var startAnchor = null;
-            var endAnchor = null;
-            for (var i = 0; i < nodes.length; i++) {{
-                if (!startAnchor && nodes[i].end > startIndex) startAnchor = nodes[i].node;
-                if (nodes[i].start < endIndex) endAnchor = nodes[i].node;
-            }}
-            if (startAnchor && endAnchor) {{
-                var range = document.createRange();
-                range.setStartBefore(startAnchor);
-                range.setEndAfter(endAnchor);
-                var hw = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT, {{
-                    acceptNode: function(node) {{
-                        if (node.nodeValue.trim().length === 0) return NodeFilter.FILTER_REJECT;
-                        var p = node.parentNode;
-                        if (p) {{
-                            var tag = p.tagName.toLowerCase();
-                            if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT;
+            bestRanges.forEach(function(r) {{
+                for (var i = 0; i < nodes.length; i++) {{
+                    var nObj = nodes[i];
+                    if (nObj.start < r.end && nObj.end > r.start) {{
+                        if (!startAnchor) startAnchor = nObj.node;
+                        if (!nObj.wrapped) {{
+                            var span = document.createElement('span');
+                            span.className = 'api-sandbox-highlight';
+                            span.style.backgroundColor = 'rgba(250, 204, 21, 0.4)';
+                            span.style.color = '#000';
+                            nObj.node.parentNode.insertBefore(span, nObj.node);
+                            span.appendChild(nObj.node);
+                            nObj.wrapped = true;
                         }}
-                        if (range.intersectsNode(node)) return NodeFilter.FILTER_ACCEPT;
-                        return NodeFilter.FILTER_REJECT;
                     }}
-                }}, false);
-                var nodesToWrap = [];
-                var hn;
-                while(hn = hw.nextNode()) nodesToWrap.push(hn);
-                nodesToWrap.forEach(function(node) {{
-                    var span = document.createElement('span');
-                    span.className = 'api-sandbox-highlight';
-                    span.style.backgroundColor = 'rgba(250, 204, 21, 0.4)';
-                    span.style.color = '#000';
-                    node.parentNode.insertBefore(span, node);
-                    span.appendChild(node);
-                }});
-                setTimeout(() => {{
-                    if (startAnchor && startAnchor.parentElement) {{
-                        startAnchor.parentElement.scrollIntoView({{behavior: 'smooth', block: 'center'}});
-                    }}
-                }}, 100);
-            }}
+                }}
+            }});
+            setTimeout(() => {{
+                if (startAnchor && startAnchor.parentElement) {{
+                    startAnchor.parentElement.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                }}
+            }}, 100);
         }}
     }} catch(e) {{ console.error("Highlight block injection failed", e); }}
 }});

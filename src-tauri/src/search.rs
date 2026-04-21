@@ -323,12 +323,16 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
     let content_lower = content.to_lowercase();
     let lines_lower: Vec<&str> = content_lower.lines().collect();
 
+    let mut unique_tokens = query_tokens.to_vec();
+    unique_tokens.sort();
+    unique_tokens.dedup();
+
     let mut line_hits: Vec<usize> = vec![0; lines.len()];
     let mut max_hits = 0;
 
     for (i, line) in lines_lower.iter().enumerate() {
         let mut hits = 0;
-        for token in query_tokens {
+        for token in &unique_tokens {
             if line.contains(token) {
                 hits += 1;
             }
@@ -360,7 +364,7 @@ fn extract_dense_block(content: &str, query_tokens: &[String]) -> (usize, usize,
         return (0, 0, String::new());
     }
 
-    let max_gap = 2;
+    let max_gap = 4;
     let mut best_start = hit_lines[0].0;
     let mut best_end = hit_lines[0].0;
     let mut best_score = 0;
